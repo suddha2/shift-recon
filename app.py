@@ -181,15 +181,9 @@ with tab1:
             # Analyze button
             col1, col2, col3 = st.columns([1, 2, 1])
             with col2:
-                if st.button(
-                    "🔍 Run Analysis", 
-                    type="primary", 
-                    use_container_width=True,
-                    disabled=st.session_state.is_processing
-                ):
-                    # Set processing state to True (disables button)
+                if st.button("🔍 Run Analysis", type="primary", use_container_width=True, disabled=st.session_state.is_processing):
                     st.session_state.is_processing = True
-                    
+
                     try:
                         progress = st.progress(0, text="Starting analysis...")
                         df = st.session_state.df.copy()
@@ -224,8 +218,10 @@ with tab1:
                             # Update progress bar
                             progress.progress(end / total_rows, text=f"Processed {end} of {total_rows} rows")
 
+                        # Finalize progress bar
                         progress.progress(1.0, text="✅ Analysis complete")
 
+                        # Save results
                         results = {
                             'duplicate_allocations': duplicates,
                             'over_allocations': over_allocs,
@@ -235,13 +231,12 @@ with tab1:
 
                         st.session_state.results = results
                         st.session_state.analyzed = True
-                        st.session_state.is_processing = False
 
                         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                         saved_count = save_analysis_results(results, timestamp)
 
                         st.success(f"✅ Analysis complete! Found {results['total_issues']} issues. Saved {saved_count} records to database.")
-                        st.rerun()
+                        st.session_state.is_processing = False
 
                     except Exception as e:
                         st.session_state.is_processing = False
@@ -255,6 +250,7 @@ with tab1:
                         st.write(list(df.columns))
                         st.markdown("**Sample of 'Actual End Date And Time' column:**")
                         st.write(df.head(20))
+
         
         except Exception as e:
             st.error(f"❌ Error reading file: {str(e)}")

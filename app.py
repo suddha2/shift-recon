@@ -9,7 +9,14 @@ import streamlit_authenticator as stauth
 import yaml
 from yaml.loader import SafeLoader
 
-from analyzer import analyze_workforce_data
+
+from analyzer import (
+    analyze_workforce_data,
+    check_unallowed_combinations,
+    check_duplicate_allocations,
+    check_over_allocations
+)
+
 from database import (
     init_database, 
     save_analysis_results, 
@@ -184,38 +191,70 @@ with tab1:
                     st.session_state.is_processing = True
                     
                     try:
-                        with st.spinner("Analyzing data..."):
-                            # Run analysis
-                            results = analyze_workforce_data(df)
-                            st.session_state.results = results
-                            st.session_state.analyzed = True
-                            
-                            # Save to database
-                            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                            saved_count = save_analysis_results(results, timestamp)
-                            
-                            # Reset processing state to False (re-enables button)
-                            st.session_state.is_processing = False
-                            
-                            st.success(f"✅ Analysis complete! Found {results['total_issues']} issues. Saved {saved_count} records to database.")
-                        
+                        progress = st.progress(0, text="Starting analysis...")
+                        df = st.session_state.df.copy()
+                        df['_row_num'] = range(2, len(df) + 2)
+                        total_rows = len(df)
+                        chunk_size = 1000
+
+                        # Preallocate issue lists
+                        unallowed = []
+                        duplicates = []
+                        over_allocs = []
+
+                        for start in range(0, total_rows, chunk_size):
+                            end = min(start + chunk_size, total_rows)
+                            chunk = df.iloc[start:end]
+
+                            # Step 1: Check unallowed combinations
+                            chunk_unallowed = check_unallowed_combinations(chunk.copy())
+                            unallowed.extend(chunk_unallowed)
+
+                            # Step 2: Filter valid rows
+                            invalid_row_nums = set(int(issue['row_numbers']) for issue in chunk_unallowed)
+                            valid_chunk = chunk[~chunk['_row_num'].isin(invalid_row_nums)]
+
+                            # Step 3: Run other checks on valid rows
+                            chunk_duplicates = check_duplicate_allocations(valid_chunk.copy())
+                            chunk_over_allocs = check_over_allocations(valid_chunk.copy())
+
+                            duplicates.extend(chunk_duplicates)
+                            over_allocs.extend(chunk_over_allocs)
+
+                            # Update progress bar
+                            progress.progress(end / total_rows, text=f"Processed {end} of {total_rows} rows")
+
+                        progress.progress(1.0, text="✅ Analysis complete")
+
+                        results = {
+                            'duplicate_allocations': duplicates,
+                            'over_allocations': over_allocs,
+                            'unallowed_combinations': unallowed,
+                            'total_issues': len(duplicates) + len(over_allocs) + len(unallowed)
+                        }
+
+                        st.session_state.results = results
+                        st.session_state.analyzed = True
+                        st.session_state.is_processing = False
+
+                        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        saved_count = save_analysis_results(results, timestamp)
+
+                        st.success(f"✅ Analysis complete! Found {results['total_issues']} issues. Saved {saved_count} records to database.")
                         st.rerun()
-                    
+
                     except Exception as e:
                         st.session_state.is_processing = False
                         st.error(f"❌ Analysis error: {str(e)}")
-                        
-                        # Show detailed traceback
                         import traceback
                         with st.expander("🔍 Error Details"):
                             st.code(traceback.format_exc())
-                        
-                        # Debug: Show problematic data
-                        st.write("**Debug Info:**")
-                        st.write(f"DataFrame shape: {df.shape}")
-                        st.write(f"Columns: {list(df.columns)}")
-                        st.write("\n**Sample of 'Actual End Date And Time' column:**")
-                        st.write(df['Actual End Date And Time'].head(20))
+                        st.markdown("**DataFrame shape:**")
+                        st.write(df.shape)
+                        st.markdown("**Columns:**")
+                        st.write(list(df.columns))
+                        st.markdown("**Sample of 'Actual End Date And Time' column:**")
+                        st.write(df.head(20))
         
         except Exception as e:
             st.error(f"❌ Error reading file: {str(e)}")

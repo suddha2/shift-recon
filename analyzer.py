@@ -37,6 +37,12 @@ def check_duplicate_allocations(df):
     Returns list of issue dictionaries
     """
     issues = []
+
+
+
+    # ✅ Filter to include only rows where 'Actual Service Type Description' contains 'shift' (case-insensitive)
+    df = df[df['Actual Service Type Description'].str.contains('shift', case=False, na=False)]
+
     
     # Parse datetime columns
     df['start_dt'] = df['Actual Start Date And Time'].apply(parse_datetime)
@@ -198,7 +204,7 @@ def check_over_allocations(df):
         total_hours = group['hours'].sum()
         emp_limit = EMPLOYEE_HOUR_LIMITS.get(emp, DEFAULT_HOUR_LIMIT)
         
-        if emp_limit is not None and total_hours > emp_limit:
+        if emp_limit is not None and emp_limit >= 0 and total_hours > emp_limit:
             row_numbers = group['_row_num'].tolist()
             issues.append({
                 'issue_type': 'Weekly Hours Over-allocation',

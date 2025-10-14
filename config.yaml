@@ -1,0 +1,15 @@
+credentials:
+  usernames:
+    admin:
+      email: admin@example.com
+      name: Admin User
+      password: $2b$12$SDHRdA16dgIaWFDGdaG.zuS8oUkMN/7KLPBopr0oDlQR5ok7u1kO.  # admin2025
+    manager:
+      email: recon@midco-care.co.uk
+      name: Recon Manager
+      password: $2b$12$UJiGLYrU5/C7DAEYULP6NuOIOEaa4Cm7KWrbMOfHv4s8RO6dMOSvG  # midco-man2025
+
+cookie:
+  expiry_days: 1
+  key: random_signature_key_12345  # Change this to a random string
+  name: midco_wf_cookie

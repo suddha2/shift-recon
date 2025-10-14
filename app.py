@@ -91,7 +91,9 @@ with col2:
         for key in list(st.session_state.keys()):
             if key.startswith("authentication") or key in ["name", "username"]:
                 del st.session_state[key]
-        st.rerun()
+        st.session_state["authentication_status"] = None
+        st.stop()
+
 
 st.markdown(f"**Welcome, {st.session_state.get('name', 'User')}!**")
 st.markdown("---")
@@ -393,7 +395,11 @@ with tab4:
             if st.button("🗑️ Delete Selected", type="secondary"):
                 deleted = delete_analysis(selected_timestamp)
                 st.success(f"Deleted {deleted} records")
-                st.rerun()
+                st.session_state.analyzed = False
+                st.session_state.results = None
+                st.session_state.df = None
+                st.stop()
+
         
         if selected_timestamp:
             history_df = get_analysis_by_timestamp(selected_timestamp)

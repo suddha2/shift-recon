@@ -121,7 +121,7 @@ with st.sidebar:
     st.info("💡 Edit rules in `config.py`")
 
 # Main content tabs
-tab1, tab2, tab3 = st.tabs(["🔍 New Analysis", "📊 View Results", "🗂️ History"])
+tab1, tab2, tab3, tab4 = st.tabs(["🔍 New Analysis", "📊 View Results", "❌ Error Rows", "🗂️ History"])
 
 # Tab 1: New Analysis
 with tab1:
@@ -137,9 +137,35 @@ with tab1:
         try:
             # Read CSV
             df = pd.read_csv(uploaded_file)
+            df.columns = df.columns.str.strip().str.replace(r'\s+', ' ', regex=True)
+            df.columns = df.columns.str.replace('Desciption', 'Description', regex=False)
+            df.columns = df.columns.str.replace('and Time', 'And Time', regex=False)
             st.session_state.df = df
             
             st.success(f"✅ File loaded successfully: {len(df)} rows")
+            
+            # DEBUG: Show column names
+            with st.expander("🔍 Column Names (Debug)", expanded=False):
+                st.write("**Columns in your CSV:**")
+                for i, col in enumerate(df.columns):
+                    st.write(f"{i+1}. `{col}` (length: {len(col)} chars)")
+                
+                # Check for required columns
+                required_cols = [
+                    'Actual Employee Name',
+                    'Actual Start Date And Time',
+                    'Actual End Date And Time',
+                    'Service Location Name',
+                    'Actual Service Type Description',
+                    'Actual Pay Rate Type',
+                    'Actual Service Requirement Type Description'
+                ]
+                st.write("\n**Required columns check:**")
+                for col in required_cols:
+                    if col in df.columns:
+                        st.success(f"✅ {col}")
+                    else:
+                        st.error(f"❌ {col} - NOT FOUND")
             
             # Show preview
             with st.expander("📄 Data Preview", expanded=True):
@@ -157,22 +183,39 @@ with tab1:
                     # Set processing state to True (disables button)
                     st.session_state.is_processing = True
                     
-                    with st.spinner("Analyzing data..."):
-                        # Run analysis
-                        results = analyze_workforce_data(df)
-                        st.session_state.results = results
-                        st.session_state.analyzed = True
+                    try:
+                        with st.spinner("Analyzing data..."):
+                            # Run analysis
+                            results = analyze_workforce_data(df)
+                            st.session_state.results = results
+                            st.session_state.analyzed = True
+                            
+                            # Save to database
+                            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                            saved_count = save_analysis_results(results, timestamp)
+                            
+                            # Reset processing state to False (re-enables button)
+                            st.session_state.is_processing = False
+                            
+                            st.success(f"✅ Analysis complete! Found {results['total_issues']} issues. Saved {saved_count} records to database.")
                         
-                        # Save to database
-                        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                        saved_count = save_analysis_results(results, timestamp)
-                        
-                        # Reset processing state to False (re-enables button)
-                        st.session_state.is_processing = False
-                        
-                        st.success(f"✅ Analysis complete! Found {results['total_issues']} issues. Saved {saved_count} records to database.")
+                        st.rerun()
                     
-                    st.rerun()
+                    except Exception as e:
+                        st.session_state.is_processing = False
+                        st.error(f"❌ Analysis error: {str(e)}")
+                        
+                        # Show detailed traceback
+                        import traceback
+                        with st.expander("🔍 Error Details"):
+                            st.code(traceback.format_exc())
+                        
+                        # Debug: Show problematic data
+                        st.write("**Debug Info:**")
+                        st.write(f"DataFrame shape: {df.shape}")
+                        st.write(f"Columns: {list(df.columns)}")
+                        st.write("\n**Sample of 'Actual End Date And Time' column:**")
+                        st.write(df['Actual End Date And Time'].head(20))
         
         except Exception as e:
             st.error(f"❌ Error reading file: {str(e)}")
@@ -181,9 +224,9 @@ with tab1:
 with tab2:
     if st.session_state.analyzed and st.session_state.results:
         results = st.session_state.results
-        
+
         st.header("Analysis Results")
-        
+
         # Summary metrics
         col1, col2, col3, col4 = st.columns(4)
         with col1:
@@ -194,43 +237,107 @@ with tab2:
             st.metric("Over-allocations", len(results['over_allocations']))
         with col4:
             st.metric("Invalid Combos", len(results['unallowed_combinations']))
-        
+
         st.markdown("---")
-        
-        # Display issues by category
-        if results['duplicate_allocations']:
-            st.subheader("🔴 Duplicate Allocations")
-            st.caption("Employees with overlapping shift times")
-            dup_df = pd.DataFrame(results['duplicate_allocations'])
-            st.dataframe(
-                dup_df.style.apply(lambda x: ['background-color: #ffcccc']*len(x), axis=1),
-                use_container_width=True
+
+        # Pagination helper
+        def show_paginated_df(df, label, key_prefix, color=None):
+            if df.empty:
+                st.info(f"✅ No {label.lower()} found.")
+                return
+
+            st.subheader(label)
+            if color:
+                st.caption(f"Styled with background color: {color}")
+            else:
+                st.caption("Paginated view")
+
+            page_size = 100
+            total_pages = (len(df) - 1) // page_size + 1
+            page = st.number_input(
+                f"{label} Page",
+                min_value=1,
+                max_value=total_pages,
+                value=1,
+                key=f"{key_prefix}_page"
             )
-        
-        if results['over_allocations']:
-            st.subheader("🟠 Over-allocations")
-            over_df = pd.DataFrame(results['over_allocations'])
-            st.dataframe(
-                over_df.style.apply(lambda x: ['background-color: #ffe6cc']*len(x), axis=1),
-                use_container_width=True
-            )
-        
-        if results['unallowed_combinations']:
-            st.subheader("🟡 Unallowed Combinations")
-            combo_df = pd.DataFrame(results['unallowed_combinations'])
-            st.dataframe(
-                combo_df.style.apply(lambda x: ['background-color: #fff4cc']*len(x), axis=1),
-                use_container_width=True
-            )
-        
+
+            start = (page - 1) * page_size
+            end = start + page_size
+            page_df = df.iloc[start:end]
+
+            st.dataframe(page_df, use_container_width=True)
+
+        # Show each category with pagination
+        dup_df = pd.DataFrame(results['duplicate_allocations'])
+        show_paginated_df(dup_df, "🔴 Duplicate Allocations", "dup")
+
+        over_df = pd.DataFrame(results['over_allocations'])
+        show_paginated_df(over_df, "🟠 Over-allocations", "over")
+
+        combo_df = pd.DataFrame(results['unallowed_combinations'])
+        show_paginated_df(combo_df, "🟡 Unallowed Combinations", "combo")
+
         if results['total_issues'] == 0:
             st.success("✅ No issues found! All allocations are valid.")
-    
+
     else:
         st.info("🔍 Upload a CSV file in the 'New Analysis' tab to get started.")
 
-# Tab 3: History
+
+# Tab 3: Error Rows
 with tab3:
+    if st.session_state.analyzed and st.session_state.results:
+        results = st.session_state.results
+        error_rows = results.get('error_rows', [])
+        
+        if error_rows:
+            st.header("❌ Error Rows")
+            st.caption("These rows were excluded from analysis due to data issues")
+            
+            # Summary
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Error Rows", len(error_rows))
+            with col2:
+                st.metric("Total Rows Analyzed", results.get('total_valid_rows', 0))
+            with col3:
+                error_pct = (len(error_rows) / results.get('total_rows', 1)) * 100
+                st.metric("Error Rate", f"{error_pct:.1f}%")
+            
+            st.markdown("---")
+            
+            # Display error rows
+            error_df = pd.DataFrame(error_rows)
+            
+            # Color code by error type
+            st.dataframe(
+                error_df.style.apply(lambda x: ['background-color: #ffebee']*len(x), axis=1),
+                use_container_width=True
+            )
+            
+            # Export error rows
+            col1, col2, col3 = st.columns([2, 1, 2])
+            with col2:
+                excel_buffer = io.BytesIO()
+                with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                    error_df.to_excel(writer, index=False, sheet_name='Error Rows')
+                excel_buffer.seek(0)
+                
+                st.download_button(
+                    label="📥 Download Error Rows",
+                    data=excel_buffer,
+                    file_name="error_rows.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+        else:
+            st.success("✅ No error rows! All data is valid.")
+    else:
+        st.info("🔍 Upload a CSV file in the 'New Analysis' tab to get started.")
+
+# Tab 4: History
+with tab4:
     st.header("Analysis History")
     
     timestamps = get_unique_analysis_timestamps()

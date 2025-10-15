@@ -108,10 +108,10 @@ with st.sidebar:
             if isinstance(limit, dict):
                 operator = limit.get("operator", "<=")
                 value = limit.get("value", 0)
-                st.write(f"**{shift_type} ({rate_type}):** {operator} {value}/week")
+                st.write(f"**{shift_type} ({rate_type}):** {operator} {value} hours/day")
             else:
-                st.write(f"**{shift_type} ({rate_type}):** ≤ {limit}/week")
-    
+                st.write(f"**{shift_type} ({rate_type}):** ≤ {limit} hours/day")
+
     with st.expander("⏰ Hour Limits", expanded=False):
         st.write(f"**Default:** {EMPLOYEE_HOUR_LIMITS.get('DEFAULT', 48)} hours/week")
         st.write("**Custom Limits:**")

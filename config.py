@@ -18,11 +18,14 @@ SHIFT_TYPE_LIMITS = {
 ("Floating Support","Zero"):{"operator": "<=", "value": 4}, 
 ("Sleep In Support","Zero"):{"operator": "<=", "value": 12}, 
 ("Waking Night Support","Zero"):{"operator": "<=", "value": 12},
-("Maintenance Shift - Adhoc Shift","Fixed"):{"operator": ">=", "value": 6}, 
-("Maintenance Shift - Adhoc Shift","Hourly"):{"operator": "<", "value": 6}, 
-("Driver Shift - Adhoc Shift","Hourly"):{"operator": "<=", "value": 4}, 
-("On Call Shft","Fixed"):{"operator": "<=", "value": 12}, 
+("Adhoc Shift","Fixed"):{"operator": ">=", "value": 6}, 
+("Adhoc Shift","Hourly"):{"operator": "<", "value": 6}, 
+("Driver Shift","Hourly"):{"operator": "<=", "value": 4}, 
+("On Call Shift","Fixed"):{"operator": "<=", "value": 12}, 
 ("Shift Lead - Shift","Fixed"):{"operator": "<=", "value": 8}, 
+("Training","Hourly"):{"operator": "<=", "value": 8},  
+("Shadow","Hourly"):{"operator": "<=", "value": 6},  
+("Paid Sleep In ","Fixed"):{"operator": "<=", "value": 10}, 
 
     # Add more shift types here as: "Shift Type Name": max_count
 }
@@ -62,11 +65,14 @@ ALLOWED_COMBINATIONS = [
 ("Floating Support","Cover"), 
 ("Sleep In Support","Sleep In"), 
 ("Waking Night Support","Waking Nights"),
-("Maintenance Shift - Adhoc Shift","Duties"), 
-("Maintenance Shift - Adhoc Shift","Duties"), 
-("Driver Shift - Adhoc Shift","Duties"), 
-("On Call Shft","On Call"), 
+("Adhoc Shift","Duties"), 
+("Driver Shift","Duties"), 
+("On Call Shift","On Call"), 
 ("Shift Lead - Shift","Day Support"), 
+("Training","Training"),
+("Shadow","Shadow"),
+("Paid Sleep In","Sleep In"),
+
    # Add more allowed combinations here as: ("Service Type", "Requirement Type")
 ]
 

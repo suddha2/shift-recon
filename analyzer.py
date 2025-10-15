@@ -131,92 +131,80 @@ def check_over_allocations(df):
     Returns list of issue dictionaries
     """
     issues = []
-    
+
     # Parse datetime columns
     df['start_dt'] = df['Actual Start Date And Time'].apply(parse_datetime)
     df['end_dt'] = df['Actual End Date And Time'].apply(parse_datetime)
-    df['week'], df['year'] = zip(*df['start_dt'].apply(lambda x: get_week_number(x)))
+    df['date'] = df['start_dt'].apply(lambda x: x.date() if x else None)
     df['hours'] = df.apply(lambda row: calculate_hours(row['start_dt'], row['end_dt']), axis=1)
+
+    # Group by employee and date
+    grouped = df.groupby(['Actual Employee Name', 'date'])
+
     
-    # Group by employee, year, and week
-    grouped = df.groupby(['Actual Employee Name', 'year', 'week'])
-    
-    for (emp, year, week), group in grouped:
-        if week is None:
+
+    for (emp, date), group in grouped:
+        if date is None:
             continue
-        
+
         # Check shift type + rate type combination limits
-        # Create a combination column
         group['shift_rate_combo'] = list(zip(
             group['Actual Service Type Description'],
             group['Actual Pay Rate Type']
         ))
-        
-        combo_counts = group['shift_rate_combo'].value_counts()
-        
-        for combo, count in combo_counts.items():
+
+
+        combo_groups = group.groupby('shift_rate_combo')
+
+        for combo, combo_group in combo_groups:
             shift_type, rate_type = combo
-            
-            # Check if this combination has a limit defined
+            total_combo_hours = combo_group['hours'].sum()
+
             if combo in SHIFT_TYPE_LIMITS:
                 limit_config = SHIFT_TYPE_LIMITS[combo]
-                
-                # Handle both old format (int) and new format (dict)
+
                 if isinstance(limit_config, dict):
                     operator = limit_config.get("operator", "<=")
                     limit_value = limit_config.get("value", 0)
                 else:
-                    # Backward compatibility: treat int as <=
                     operator = "<="
                     limit_value = limit_config
                 
-                # Check if the count violates the rule
                 violation = False
-                if operator == "<=" and count > limit_value:
+                violation_msg=""
+                if operator == "<=" and total_combo_hours > limit_value:
                     violation = True
-                    violation_msg = f"exceeds maximum of {limit_value}"
-                elif operator == ">=" and count < limit_value:
+                    violation_msg = f"exceeds maximum of {limit_value} hours"
+                elif operator == ">=" and total_combo_hours < limit_value:
                     violation = True
-                    violation_msg = f"below minimum of {limit_value}"
-                elif operator == "<" and count >= limit_value:
+                    violation_msg = f"below minimum of {limit_value} hours"
+                elif operator == "<" and total_combo_hours >= limit_value:
                     violation = True
-                    violation_msg = f"must be less than {limit_value}"
-                elif operator == ">" and count <= limit_value:
+                    violation_msg = f"must be less than {limit_value} hours"
+                elif operator == ">" and total_combo_hours <= limit_value:
                     violation = True
-                    violation_msg = f"must be greater than {limit_value}"
-                elif operator == "==" and count != limit_value:
+                    violation_msg = f"must be greater than {limit_value} hours"
+                elif operator == "==" and total_combo_hours != limit_value:
                     violation = True
-                    violation_msg = f"must be exactly {limit_value}"
+                    violation_msg = f"must be exactly {limit_value} hours"
                 
+
+
                 if violation:
-                    row_numbers = group[group['shift_rate_combo'] == combo]['_row_num'].tolist()
+                    row_numbers = combo_group['_row_num'].tolist()
                     issues.append({
-                        'issue_type': 'Shift Type Over-allocation',
+                        'issue_type': 'Shift Type Hour Over-allocation',
                         'employee_name': emp,
-                        'date': None,
-                        'week': f"{year}-W{week:02d}",
+                        'date': date,
+                        'week': None,
                         'shift_type': f"{shift_type} ({rate_type})",
-                        'details': f"{count} shifts of '{shift_type}' with '{rate_type}' rate - {violation_msg}",
+                        'details': f"{total_combo_hours:.1f} hours of '{shift_type}' with '{rate_type}' rate - {violation_msg}",
                         'row_numbers': ', '.join(map(str, row_numbers))
                     })
-        
-        # Check hour limits
-        total_hours = group['hours'].sum()
-        emp_limit = EMPLOYEE_HOUR_LIMITS.get(emp, DEFAULT_HOUR_LIMIT)
-        
-        if emp_limit is not None and emp_limit >= 0 and total_hours > emp_limit:
-            row_numbers = group['_row_num'].tolist()
-            issues.append({
-                'issue_type': 'Weekly Hours Over-allocation',
-                'employee_name': emp,
-                'date': None,
-                'week': f"{year}-W{week:02d}",
-                'shift_type': 'All shifts',
-                'details': f"{total_hours:.1f} hours (limit: {emp_limit})",
-                'row_numbers': ', '.join(map(str, row_numbers))
-            })
-    
+  
+
     return issues
+
 
 def check_unallowed_combinations(df):
     """

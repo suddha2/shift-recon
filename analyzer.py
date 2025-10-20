@@ -3,7 +3,7 @@
 
 import pandas as pd
 from datetime import datetime, timedelta
-from config import SHIFT_TYPE_LIMITS, EMPLOYEE_HOUR_LIMITS, DEFAULT_HOUR_LIMIT, ALLOWED_COMBINATIONS
+from config import SHIFT_TYPE_LIMITS, EMPLOYEE_HOUR_LIMITS, DEFAULT_HOUR_LIMIT, ALLOWED_COMBINATIONS,RATE_CARD_MAP 
 
 def parse_datetime(dt_str):
     """Parse datetime string to datetime object with UK/European date format (DD/MM/YYYY)"""
@@ -117,6 +117,8 @@ def check_duplicate_allocations(df):
                 'employee_name': emp,
                 'date': issue_date,
                 'week': None,
+                'actual_hours': None,
+                'limit_hours': None,
                 'shift_type': ' | '.join(shift_details),
                 'details': f"Overlapping shifts: {', '.join(reasons)}",
                 'row_numbers': ', '.join(map(str, row_nums))
@@ -197,6 +199,8 @@ def check_over_allocations(df):
                         'employee_name': emp,
                         'date': date,
                         'week': None,
+                        'actual_hours': total_combo_hours,
+                        'limit_hours': limit_value,
                         'shift_type': f"{shift_type} ({rate_type})",
                         'details': f"{total_combo_hours:.1f} hours of '{shift_type}' with '{rate_type}' rate - {violation_msg}",
                         'row_numbers': ', '.join(map(str, row_numbers))
@@ -229,12 +233,58 @@ def check_unallowed_combinations(df):
                 'employee_name': row['Actual Employee Name'],
                 'date': parse_datetime(row['Actual Start Date And Time']).date() if parse_datetime(row['Actual Start Date And Time']) else None,
                 'week': None,
+                'actual_hours': None,
+                'limit_hours': None,
                 'shift_type': service_type,
                 'details': f"Invalid: '{service_type}' + '{requirement_type}'",
                 'row_numbers': str(row['_row_num'])
             })
     
     return issues
+
+def check_rate_mismatches(df):
+    """
+    Check for mismatches between actual pay rate and expected rate from RATE_CARD_MAP
+    Returns list of issue dictionaries
+    """
+    issues = []
+
+    for idx, row in df.iterrows():
+        sheet_desc = str(row.get('Actual Pay Rate Sheet Description', '')).strip()
+        rate_type = str(row.get('Actual Pay Rate Type', '')).strip()
+        service_type = str(row.get('Actual Service Type Description', '')).strip()
+        actual_rate = row.get('Actual Pay Rate', None)
+
+        key1 = (sheet_desc,)
+        key2 = (service_type, rate_type)
+
+        expected_rate = None
+        if key1 in RATE_CARD_MAP:
+            expected_rate = RATE_CARD_MAP[key1]
+        elif key2 in RATE_CARD_MAP:
+            expected_rate = RATE_CARD_MAP[key2]
+
+        if expected_rate is not None and actual_rate is not None:
+            try:
+                actual_rate_float = float(actual_rate)
+                if abs(actual_rate_float - expected_rate) > 0.01:
+                    issues.append({
+                        'issue_type': 'Rate Mismatch',
+                        'employee_name': row.get('Actual Employee Name', 'N/A'),
+                        'date': parse_datetime(row.get('Actual Start Date And Time')).date() if row.get('Actual Start Date And Time') else None,
+                        'week': None,
+                        'actual_hours': None,
+                        'limit_hours': expected_rate,
+                        'shift_type': service_type,
+                        'details': f"Expected rate: £{expected_rate:.2f}, Actual rate: £{actual_rate_float:.2f}",
+                        'row_numbers': str(row['_row_num'])
+                    })
+            except:
+                continue
+
+    return issues
+
+
 
 def analyze_workforce_data(df):
     """

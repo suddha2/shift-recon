@@ -14,7 +14,8 @@ from analyzer import (
     analyze_workforce_data,
     check_unallowed_combinations,
     check_duplicate_allocations,
-    check_over_allocations
+    check_over_allocations,
+    check_rate_mismatches,
 )
 
 from database import (
@@ -197,7 +198,9 @@ with tab1:
                         unallowed = []
                         duplicates = []
                         over_allocs = []
+                        rate_mismatches = []
 
+                        
                         for start in range(0, total_rows, chunk_size):
                             end = min(start + chunk_size, total_rows)
                             chunk = df.iloc[start:end]
@@ -214,6 +217,10 @@ with tab1:
                             chunk_duplicates = check_duplicate_allocations(valid_chunk.copy())
                             chunk_over_allocs = check_over_allocations(valid_chunk.copy())
 
+                            # Step 4: Rate mismatch check
+                            chunk_rate_mismatches = check_rate_mismatches(valid_chunk.copy())
+                            rate_mismatches.extend(chunk_rate_mismatches)
+
                             duplicates.extend(chunk_duplicates)
                             over_allocs.extend(chunk_over_allocs)
 
@@ -228,7 +235,8 @@ with tab1:
                             'duplicate_allocations': duplicates,
                             'over_allocations': over_allocs,
                             'unallowed_combinations': unallowed,
-                            'total_issues': len(duplicates) + len(over_allocs) + len(unallowed)
+                            'rate_mismatches': rate_mismatches,
+                            'total_issues': len(duplicates) + len(over_allocs) + len(unallowed) + len(rate_mismatches)
                         }
 
                         st.session_state.results = results
@@ -265,7 +273,7 @@ with tab2:
         st.header("Analysis Results")
 
         # Summary metrics
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4,col5 = st.columns(5)
         with col1:
             st.metric("Total Issues", results['total_issues'])
         with col2:
@@ -274,7 +282,8 @@ with tab2:
             st.metric("Over-allocations", len(results['over_allocations']))
         with col4:
             st.metric("Invalid Combos", len(results['unallowed_combinations']))
-
+        with col5:
+            st.metric("Rate Mismatches", len(results['rate_mismatches']))
         st.markdown("---")
 
         # Pagination helper
@@ -314,6 +323,9 @@ with tab2:
 
         combo_df = pd.DataFrame(results['unallowed_combinations'])
         show_paginated_df(combo_df, "🟡 Unallowed Combinations", "combo")
+
+        rate_df = pd.DataFrame(results['rate_mismatches'])
+        show_paginated_df(rate_df, "🟣 Rate Mismatches", "rate")
 
         if results['total_issues'] == 0:
             st.success("✅ No issues found! All allocations are valid.")
@@ -407,7 +419,7 @@ with tab4:
             st.subheader(f"Results from {selected_timestamp}")
             
             # Summary
-            col1, col2, col3, col4 = st.columns(4)
+            col1, col2, col3, col4,col5 = st.columns(5)
             with col1:
                 st.metric("Total Issues", len(history_df))
             with col2:
@@ -416,7 +428,9 @@ with tab4:
                 st.metric("Over-allocations", len(history_df[history_df['issue_type'].str.contains('Over-allocation')]))
             with col4:
                 st.metric("Invalid Combos", len(history_df[history_df['issue_type'] == 'Unallowed Combination']))
-            
+            with col5:
+                st.metric("Rate Mismatches", len(history_df[history_df['issue_type'] == 'Rate Mismatch']))
+
             # Filters
             col1, col2 = st.columns(2)
             with col1:

@@ -20,6 +20,8 @@ def init_database():
             employee_name TEXT,
             issue_date TEXT,
             week TEXT,
+            actual_hours TEXT,
+            limit_hours TEXT,
             shift_type TEXT,
             details TEXT,
             row_numbers TEXT,
@@ -57,6 +59,8 @@ def save_analysis_results(issues_dict, analysis_timestamp=None):
             'employee_name': issue['employee_name'],
             'issue_date': str(issue['date']) if issue['date'] else None,
             'week': issue['week'],
+            'actual_hours':issue['actual_hours'],
+            'limit_hours':issue['limit_hours'],
             'shift_type': issue['shift_type'],
             'details': issue['details'],
             'row_numbers': issue['row_numbers']

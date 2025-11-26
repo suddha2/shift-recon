@@ -38,11 +38,8 @@ def check_duplicate_allocations(df):
     """
     issues = []
 
-
-
-    # ✅ Filter to include only rows where 'Actual Service Type Description' contains 'shift' (case-insensitive)
+    # Filter to include only rows where 'Actual Service Type Description' contains 'shift' (case-insensitive)
     df = df[df['Actual Service Type Description'].str.contains('shift', case=False, na=False)]
-
     
     # Parse datetime columns
     df['start_dt'] = df['Actual Start Date And Time'].apply(parse_datetime)
@@ -60,6 +57,9 @@ def check_duplicate_allocations(df):
         # Check pairs for time overlaps
         flagged_pairs = []
         
+        # 15-minute buffer for check-in/check-out
+        BUFFER_MINUTES = 15
+        
         for i in range(len(rows)):
             for j in range(i + 1, len(rows)):
                 start1, end1 = rows.loc[i, 'start_dt'], rows.loc[i, 'end_dt']
@@ -69,14 +69,42 @@ def check_duplicate_allocations(df):
                 if not (start1 and end1 and start2 and end2):
                     continue
                 
-                # Check for time overlap (this is the CRITICAL condition)
-                if start1 < end2 and start2 < end1:
-                    # There IS a time overlap - now check additional conditions
+                # Apply 15-minute buffer to check-in and check-out times
+                # Add buffer to end times (allow 15 min late checkout)
+                end1_buffered = end1 + timedelta(minutes=BUFFER_MINUTES)
+                end2_buffered = end2 + timedelta(minutes=BUFFER_MINUTES)
+                
+                # Subtract buffer from start times (allow 15 min early check-in)
+                start1_buffered = start1 - timedelta(minutes=BUFFER_MINUTES)
+                start2_buffered = start2 - timedelta(minutes=BUFFER_MINUTES)
+                
+                # Check for time overlap with buffer applied
+                # Only flag if shifts overlap by MORE than 15 minutes on both ends
+                if start1_buffered < end2_buffered and start2_buffered < end1_buffered:
+                    # There IS a time overlap
                     loc1 = rows.loc[i, 'Service Location Name']
                     loc2 = rows.loc[j, 'Service Location Name']
                     shift1 = rows.loc[i, 'Actual Service Type Description']
                     shift2 = rows.loc[j, 'Actual Service Type Description']
                     
+                    # Define allowed combinations at same location
+                    ALLOWED_SAME_LOCATION_OVERLAPS = [
+                        ("Day Shift", "Floating Shift"),
+                        ("Floating Shift", "Day Shift"),
+                        ("L - Day Shift", "Floating Shift"),
+                        ("Floating Shift", "L - Day Shift"),
+                        ("Waking Night Shift", "Floating Shift"),
+                        ("Floating Shift", "Waking Night Shift"),
+                    ]
+                    
+                    # Skip if same location AND allowed combination
+                    same_location = (loc1 == loc2)
+                    is_allowed_combo = (shift1, shift2) in ALLOWED_SAME_LOCATION_OVERLAPS
+                    
+                    if same_location and is_allowed_combo:
+                        continue  # Skip this overlap - it's allowed
+                    
+                    # Otherwise, flag it
                     has_diff_location = (loc1 and loc2 and loc1 != loc2)
                     has_diff_shift = (shift1 and shift2 and shift1 != shift2)
                     
@@ -96,6 +124,14 @@ def check_duplicate_allocations(df):
             # Get date for display (use start date of first shift)
             issue_date = rows.loc[i, 'start_dt'].date()
             
+            # Calculate actual overlap in minutes
+            start1, end1 = rows.loc[i, 'start_dt'], rows.loc[i, 'end_dt']
+            start2, end2 = rows.loc[j, 'start_dt'], rows.loc[j, 'end_dt']
+            
+            overlap_start = max(start1, start2)
+            overlap_end = min(end1, end2)
+            overlap_minutes = int((overlap_end - overlap_start).total_seconds() / 60)
+            
             # Build reason details
             reasons = ["Time overlap"]
             if pair['has_diff_location']:
@@ -105,12 +141,29 @@ def check_duplicate_allocations(df):
             
             # Create shift details for both overlapping shifts
             shift_details = []
-            for idx in [i, j]:
+            shift_1_type = ""
+            shift_1_location = ""
+            shift_1_times = ""
+            shift_2_type = ""
+            shift_2_location = ""
+            shift_2_times = ""
+            
+            for idx_num, idx in enumerate([i, j]):
                 loc = rows.loc[idx, 'Service Location Name']
                 shift = rows.loc[idx, 'Actual Service Type Description']
                 start_time = rows.loc[idx, 'start_dt'].strftime('%H:%M')
                 end_time = rows.loc[idx, 'end_dt'].strftime('%H:%M')
                 shift_details.append(f"{shift} at {loc} ({start_time}-{end_time})")
+                
+                # Store individual shift components
+                if idx_num == 0:
+                    shift_1_type = shift
+                    shift_1_location = loc
+                    shift_1_times = f"{start_time}-{end_time}"
+                else:
+                    shift_2_type = shift
+                    shift_2_location = loc
+                    shift_2_times = f"{start_time}-{end_time}"
             
             issues.append({
                 'issue_type': 'Duplicate Allocation',
@@ -119,8 +172,15 @@ def check_duplicate_allocations(df):
                 'week': None,
                 'actual_hours': None,
                 'limit_hours': None,
-                'shift_type': ' | '.join(shift_details),
-                'details': f"Overlapping shifts: {', '.join(reasons)}",
+                'shift_1_type': shift_1_type,
+                'shift_1_location': shift_1_location,
+                'shift_1_times': shift_1_times,
+                'shift_2_type': shift_2_type,
+                'shift_2_location': shift_2_location,
+                'shift_2_times': shift_2_times,
+                'shift_type': ' | '.join(shift_details),  # Keep original for compatibility
+                'overlap_minutes': overlap_minutes,
+                'details': f"Overlapping shifts: {', '.join(reasons)} ({overlap_minutes} min overlap)",
                 'row_numbers': ', '.join(map(str, row_nums))
             })
     

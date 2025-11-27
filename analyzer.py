@@ -112,6 +112,12 @@ def check_duplicate_allocations(df):
                         ("Floating Shift", "L - Day Shift"),
                         ("Waking Night Shift", "Floating Shift"),
                         ("Floating Shift", "Waking Night Shift"),
+                        ("L - Day Shift", "Sleep In Shift"),
+                        ("Floating Shift","Floating Shift"),
+                        ("Day Shift", "Day Shift"),
+                        ("Shift Lead - Shift","Floating Shift"),
+                        ("On Call Shift","On Call Shift"),
+                        ("L - Day Shift", "L - Day Shift"),
                     ]
                     
                     # Skip if same location AND allowed combination

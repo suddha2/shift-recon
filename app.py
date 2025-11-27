@@ -388,7 +388,6 @@ with tab3:
 # Tab 4: History
 with tab4:
     st.header("Analysis History")
-    
     timestamps = get_unique_analysis_timestamps()
     
     if timestamps:
@@ -410,16 +409,90 @@ with tab4:
                 st.session_state.analyzed = False
                 st.session_state.results = None
                 st.session_state.df = None
-                st.stop()
-
+                st.rerun()
         
         if selected_timestamp:
             history_df = get_analysis_by_timestamp(selected_timestamp)
             
+            # Process shift_type column to split into separate columns for duplicates
+            def split_shift_columns(df):
+                """Split shift_type column into separate columns for duplicate allocations"""
+                df = df.copy()
+                
+                # Initialize new columns
+                df['shift_1_type'] = ''
+                df['shift_1_location'] = ''
+                df['shift_1_times'] = ''
+                df['shift_2_type'] = ''
+                df['shift_2_location'] = ''
+                df['shift_2_times'] = ''
+                
+                # Only process Duplicate Allocation rows
+                duplicate_mask = df['issue_type'] == 'Duplicate Allocation'
+                
+                # Process shift_type column to split into separate columns for duplicates
+            def split_shift_columns(df):
+                """Split shift_type column into separate columns for duplicate allocations"""
+                df = df.copy()
+                
+                # Initialize new columns
+                df['shift_1_type'] = ''
+                df['shift_1_location'] = ''
+                df['shift_1_times'] = ''
+                df['shift_2_type'] = ''
+                df['shift_2_location'] = ''
+                df['shift_2_times'] = ''
+                df['overlap_minutes'] = None
+                
+                # Only process Duplicate Allocation rows
+                duplicate_mask = df['issue_type'] == 'Duplicate Allocation'
+                
+                for idx in df[duplicate_mask].index:
+                    shift_type_str = df.loc[idx, 'shift_type']
+                    details_str = df.loc[idx, 'details']
+                    
+                    if ' | ' in str(shift_type_str):
+                        # Split by pipe separator
+                        shifts = shift_type_str.split(' | ')
+                        
+                        if len(shifts) >= 2:
+                            # Process first shift
+                            shift1 = shifts[0]
+                            if ' at ' in shift1 and '(' in shift1:
+                                type_loc = shift1.split(' at ')
+                                df.loc[idx, 'shift_1_type'] = type_loc[0].strip()
+                                
+                                loc_times = type_loc[1].split('(')
+                                df.loc[idx, 'shift_1_location'] = loc_times[0].strip()
+                                df.loc[idx, 'shift_1_times'] = loc_times[1].replace(')', '').strip()
+                            
+                            # Process second shift
+                            shift2 = shifts[1]
+                            if ' at ' in shift2 and '(' in shift2:
+                                type_loc = shift2.split(' at ')
+                                df.loc[idx, 'shift_2_type'] = type_loc[0].strip()
+                                
+                                loc_times = type_loc[1].split('(')
+                                df.loc[idx, 'shift_2_location'] = loc_times[0].strip()
+                                df.loc[idx, 'shift_2_times'] = loc_times[1].replace(')', '').strip()
+                    
+                    # Extract overlap minutes from details
+                    # Extract overlap minutes from details
+                    if pd.notna(details_str) and 'min overlap' in str(details_str):
+                        import re
+                        match = re.search(r'\((-?\d+) min overlap\)', str(details_str))
+                        if match:
+                            df.loc[idx, 'overlap_minutes'] = int(match.group(1))
+                
+                return df
+            
+            # Apply the split
+            history_df = split_shift_columns(history_df)
+            
             st.subheader(f"Results from {selected_timestamp}")
             
             # Summary
-            col1, col2, col3, col4,col5 = st.columns(5)
+            col1, col2, col3, col4, col5 = st.columns(5)
             with col1:
                 st.metric("Total Issues", len(history_df))
             with col2:
@@ -429,8 +502,10 @@ with tab4:
             with col4:
                 st.metric("Invalid Combos", len(history_df[history_df['issue_type'] == 'Unallowed Combination']))
             with col5:
-                st.metric("Rate Mismatches", len(history_df[history_df['issue_type'] == 'Rate Mismatch']))
-
+                st.metric("Rate Mismatches", len(history_df[history_df['issue_type'] == 'Rate Card Mismatch']))
+            
+            st.markdown("---")
+            
             # Filters
             col1, col2 = st.columns(2)
             with col1:

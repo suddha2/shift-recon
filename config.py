@@ -71,6 +71,7 @@ ALLOWED_COMBINATIONS = [
 ("Training","Training"),
 ("Shadow","Shadow"),
 ("Paid Sleep In","Sleep In"),
+("Services Coordinator Shift","Day Support"),
 
    # Add more allowed combinations here as: ("Service Type", "Requirement Type")
 ]

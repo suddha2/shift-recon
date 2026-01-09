@@ -67,6 +67,7 @@ ALLOWED_COMBINATIONS = [
 ("Ad hoc Shift","Duties"), 
 ("Driver Shift","Duties"), 
 ("On Call Shift","On Call"), 
+("On Call Shift","Day Support"),
 ("Shift Lead - Shift","Day Support"), 
 ("Training","Training"),
 ("Shadow","Shadow"),
@@ -75,6 +76,11 @@ ALLOWED_COMBINATIONS = [
 ("Prelim Day Shift","Day Shift"),
 ("Prelim Floating Shift","Cover"),
 ("Prelim Waking Night Shift","Waking Night"),
+("Prelim Waking Night Shift", "Waking Nights"),
+("Prelim Day Shift","Long Day"),
+
+
+
 
    # Add more allowed combinations here as: ("Service Type", "Requirement Type")
 ]

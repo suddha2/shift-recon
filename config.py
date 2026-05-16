@@ -128,7 +128,40 @@ RATE_CARD_MAP={
 }
 
 # ============================================
+# EMPLOYEE / VISA DATA SYNC
+# ============================================
+# External endpoint that returns the full employee dump as CSV.
+# Synced (visa table wiped and reloaded) before every analysis run.
+APP_EMP_URL = "https://b0e2b809ef774776889ef4cbd166c019.dataengine.accessacloud.com/ds/6WNIjfr8c8LBLdA"
+APP_EMP_AUTH = "7eef61f9-519e-444e-8e4d-e215d05aa356"  # sent as the Authorization header
+APP_EMP_TIMEOUT = 30  # seconds
+
+# Columns in the employee feed CSV.
+# Visa status is taken from the part of EMP_TYPE_COL after the first ' - '
+# e.g. "Support Worker - Skilled Worker Visa" -> "Skilled Worker Visa".
+APP_EMP_NAME_COL = "EE.FullName"
+APP_EMP_TYPE_COL = "EE.EmployeeType"
+
+# Visa status -> weekly working hour rules (Monday-Sunday).
+# Same operator/value shape as SHIFT_TYPE_LIMITS.
+# Keys must match the visa portion of EE.EmployeeType exactly.
+# IMPORTANT: verify these hour caps against current UK right-to-work rules.
+VISA_HOUR_RULES = {
+    "Student Visa":                 {"operator": "<=", "value": 20},
+    "Supplementary Worker":         {"operator": "<=", "value": 20},
+    "Skilled Worker Visa":          {"operator": ">=", "value": 47.5},
+    "Graduate Visa":                {"operator": ">=", "value": 47.5},
+    "Dependent Visa":               {"operator": ">=", "value": 47.5},
+    "UK National":                  {"operator": ">=", "value": 47.5},
+    "EU Settlement status":         {"operator": ">=", "value": 47.5},
+    "Leave to Remain Indefinitely": {"operator": ">=", "value": 47.5},
+    "International Visa Migrant":   {"operator": ">=", "value": 47.5},
+    # Add more visa statuses here as: "Visa Status": {"operator": "<=", "value": hours}
+}
+
+# ============================================
 # DATABASE CONFIGURATION
 # ============================================
 DATABASE_NAME = "workforce_analysis.db"
 ANALYSIS_TABLE = "analysis_results"
+VISA_TABLE = "employee_visa_status"

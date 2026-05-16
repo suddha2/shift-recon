@@ -2,9 +2,16 @@
 # SQLite database operations for storing analysis results
 
 import sqlite3
+import io
 import pandas as pd
+import requests
 from datetime import datetime
-from config import DATABASE_NAME, ANALYSIS_TABLE
+from config import (
+    DATABASE_NAME, ANALYSIS_TABLE, VISA_TABLE,
+    APP_EMP_URL, APP_EMP_AUTH, APP_EMP_TIMEOUT,
+    APP_EMP_NAME_COL, APP_EMP_TYPE_COL
+)
+from analyzer import canonical_name
 
 def init_database():
     """Initialize SQLite database and create tables if they don't exist"""
@@ -29,8 +36,89 @@ def init_database():
         )
     ''')
     
+    # Create employee visa status table
+    cursor.execute(f'''
+        CREATE TABLE IF NOT EXISTS {VISA_TABLE} (
+            employee_name TEXT PRIMARY KEY,
+            visa_status TEXT,
+            updated_at TEXT
+        )
+    ''')
+
     conn.commit()
     conn.close()
+
+def sync_visa_data():
+    """
+    Fetch the full employee dump (CSV) from APP_EMP_URL and replace the visa table.
+    Visa status is the part of the EmployeeType column after the first ' - '.
+    Returns: (success: bool, count: int, message: str)
+    """
+    try:
+        resp = requests.get(
+            APP_EMP_URL,
+            headers={"Authorization": APP_EMP_AUTH},
+            timeout=APP_EMP_TIMEOUT
+        )
+        resp.raise_for_status()
+        feed = pd.read_csv(io.StringIO(resp.text), dtype=str)
+    except Exception as e:
+        return False, 0, f"Sync failed: {e}"
+
+    feed.columns = feed.columns.str.strip()
+    if APP_EMP_NAME_COL not in feed.columns or APP_EMP_TYPE_COL not in feed.columns:
+        return False, 0, (f"Sync failed: feed missing expected columns "
+                          f"'{APP_EMP_NAME_COL}' / '{APP_EMP_TYPE_COL}'")
+
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    records = []
+    for _, row in feed.iterrows():
+        # Feed names are hyphenated (e.g. "Beatrice-Kembabazi"); store with spaces
+        name = str(row.get(APP_EMP_NAME_COL, '') or '').strip().replace('-', ' ')
+        emp_type = str(row.get(APP_EMP_TYPE_COL, '') or '').strip()
+        # Visa status is the segment after the first ' - ' (blank if none)
+        visa_status = emp_type.split(' - ', 1)[1].strip() if ' - ' in emp_type else ''
+        if name and name.lower() != 'nan':
+            records.append((name, visa_status, timestamp))
+
+    conn = sqlite3.connect(DATABASE_NAME)
+    cursor = conn.cursor()
+    cursor.execute(f"DELETE FROM {VISA_TABLE}")
+    cursor.executemany(
+        f"INSERT OR REPLACE INTO {VISA_TABLE} (employee_name, visa_status, updated_at) VALUES (?, ?, ?)",
+        records
+    )
+    conn.commit()
+    conn.close()
+    return True, len(records), f"Synced {len(records)} employees"
+
+def get_visa_lookup():
+    """
+    Return a dict mapping canonical employee name -> visa_status.
+    Keyed by canonical_name so 'Manneh, Aji' (CSV) and 'Aji Manneh'
+    (feed) resolve to the same entry.
+    """
+    conn = sqlite3.connect(DATABASE_NAME)
+    cursor = conn.cursor()
+    try:
+        cursor.execute(f"SELECT employee_name, visa_status FROM {VISA_TABLE}")
+        rows = cursor.fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    conn.close()
+    return {canonical_name(name): status for name, status in rows}
+
+def get_last_visa_sync():
+    """Return the timestamp of the most recent visa sync, or None"""
+    conn = sqlite3.connect(DATABASE_NAME)
+    cursor = conn.cursor()
+    try:
+        cursor.execute(f"SELECT MAX(updated_at) FROM {VISA_TABLE}")
+        result = cursor.fetchone()
+    except sqlite3.OperationalError:
+        result = None
+    conn.close()
+    return result[0] if result and result[0] else None
 
 def save_analysis_results(issues_dict, analysis_timestamp=None):
     """
@@ -49,7 +137,8 @@ def save_analysis_results(issues_dict, analysis_timestamp=None):
     all_issues = (
         issues_dict.get('duplicate_allocations', []) +
         issues_dict.get('over_allocations', []) +
-        issues_dict.get('unallowed_combinations', [])
+        issues_dict.get('unallowed_combinations', []) +
+        issues_dict.get('visa_violations', [])
     )
     
     for issue in all_issues:

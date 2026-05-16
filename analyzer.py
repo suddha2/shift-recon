@@ -1,9 +1,23 @@
 # analyzer.py
 # Analysis logic for workforce allocation validation
 
+import re
 import pandas as pd
 from datetime import datetime, timedelta
-from config import SHIFT_TYPE_LIMITS, EMPLOYEE_HOUR_LIMITS, DEFAULT_HOUR_LIMIT, ALLOWED_COMBINATIONS,RATE_CARD_MAP 
+from config import SHIFT_TYPE_LIMITS, EMPLOYEE_HOUR_LIMITS, DEFAULT_HOUR_LIMIT, ALLOWED_COMBINATIONS,RATE_CARD_MAP, VISA_HOUR_RULES
+
+
+def canonical_name(name):
+    """
+    Normalize an employee name to an order-independent comparison key.
+    Tolerant of 'Last, First' vs 'First-Last' ordering and of comma/
+    hyphen/space separators. e.g. both 'Manneh, Aji' and 'Aji-Manneh'
+    -> 'aji manneh'.
+    """
+    if name is None or pd.isna(name):
+        return ''
+    tokens = [t for t in re.split(r'[,\-\s]+', str(name)) if t]
+    return ' '.join(sorted(t.lower() for t in tokens))
 
 def parse_datetime(dt_str):
     """Parse datetime string to datetime object with UK/European date format (DD/MM/YYYY)"""
@@ -17,7 +31,7 @@ def parse_datetime(dt_str):
 
 def get_week_number(dt):
     """Get week number (Monday=0) and year"""
-    if dt is None:
+    if dt is None or pd.isna(dt):
         return None, None
     # Get ISO week (Monday as first day)
     return dt.isocalendar()[1], dt.year
@@ -344,6 +358,115 @@ def check_rate_mismatches(df):
 
     return issues
 
+
+
+def check_visa_hour_violations(df, visa_lookup):
+    """
+    Check weekly (Monday-Sunday) worked hours per employee against
+    visa-status-based rules in VISA_HOUR_RULES.
+
+    visa_lookup: dict mapping employee_name -> visa_status (from the visa table)
+
+    Employees with no visa info, or a visa status with no defined rule,
+    are flagged as 'Missing Visa Info'. Must run on the FULL dataframe
+    (weekly aggregation cannot be chunked).
+    Returns list of issue dictionaries.
+    """
+    issues = []
+
+    df = df.copy()
+    df['start_dt'] = df['Actual Start Date And Time'].apply(parse_datetime)
+    df['end_dt'] = df['Actual End Date And Time'].apply(parse_datetime)
+    df['hours'] = df.apply(lambda row: calculate_hours(row['start_dt'], row['end_dt']), axis=1)
+    df['week'] = df['start_dt'].apply(lambda x: get_week_number(x)[0])
+    df['year'] = df['start_dt'].apply(lambda x: get_week_number(x)[1])
+
+    flagged_missing = set()
+
+    grouped = df.groupby(['Actual Employee Name', 'year', 'week'])
+
+    for (emp, year, week), group in grouped:
+        if week is None or year is None:
+            continue
+
+        total_hours = group['hours'].sum()
+        row_numbers = group['_row_num'].tolist()
+        week_label = f"{int(year)}-W{int(week):02d}"
+
+        visa_status = visa_lookup.get(canonical_name(emp))
+
+        # Employee not present in the visa feed
+        if visa_status is None or visa_status == '':
+            if emp not in flagged_missing:
+                flagged_missing.add(emp)
+                issues.append({
+                    'issue_type': 'Missing Visa Info',
+                    'employee_name': emp,
+                    'date': None,
+                    'week': None,
+                    'actual_hours': None,
+                    'limit_hours': None,
+                    'shift_type': None,
+                    'details': f"No visa information found for '{emp}' in the employee data feed",
+                    'row_numbers': ', '.join(map(str, row_numbers))
+                })
+            continue
+
+        rule = VISA_HOUR_RULES.get(visa_status)
+
+        # Visa status exists but has no rule defined
+        if rule is None:
+            if emp not in flagged_missing:
+                flagged_missing.add(emp)
+                issues.append({
+                    'issue_type': 'Missing Visa Info',
+                    'employee_name': emp,
+                    'date': None,
+                    'week': None,
+                    'actual_hours': None,
+                    'limit_hours': None,
+                    'shift_type': visa_status,
+                    'details': f"Visa status '{visa_status}' has no rule defined in VISA_HOUR_RULES",
+                    'row_numbers': ', '.join(map(str, row_numbers))
+                })
+            continue
+
+        operator = rule.get('operator', '<=')
+        limit_value = rule.get('value', 0)
+
+        violation = False
+        violation_msg = ""
+        if operator == "<=" and total_hours > limit_value:
+            violation = True
+            violation_msg = f"exceeds maximum of {limit_value} hours/week"
+        elif operator == ">=" and total_hours < limit_value:
+            violation = True
+            violation_msg = f"below minimum of {limit_value} hours/week"
+        elif operator == "<" and total_hours >= limit_value:
+            violation = True
+            violation_msg = f"must be less than {limit_value} hours/week"
+        elif operator == ">" and total_hours <= limit_value:
+            violation = True
+            violation_msg = f"must be greater than {limit_value} hours/week"
+        elif operator == "==" and total_hours != limit_value:
+            violation = True
+            violation_msg = f"must be exactly {limit_value} hours/week"
+
+        if violation:
+            issues.append({
+                'issue_type': 'Visa Hours Violation',
+                'employee_name': emp,
+                'date': None,
+                'week': week_label,
+                'actual_hours': round(total_hours, 1),
+                'limit_hours': limit_value,
+                'shift_type': visa_status,
+                'details': f"{total_hours:.1f} hours worked in week {week_label} "
+                           f"({visa_status} visa) - {violation_msg}",
+                'row_numbers': ', '.join(map(str, row_numbers))
+            })
+
+    return issues
 
 
 def analyze_workforce_data(df):

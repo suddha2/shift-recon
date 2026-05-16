@@ -16,18 +16,22 @@ from analyzer import (
     check_duplicate_allocations,
     check_over_allocations,
     check_rate_mismatches,
+    check_visa_hour_violations,
 )
 
 from database import (
-    init_database, 
-    save_analysis_results, 
+    init_database,
+    save_analysis_results,
     get_all_analyses,
     get_unique_analysis_timestamps,
     get_analysis_by_timestamp,
     delete_analysis,
-    export_to_excel
+    export_to_excel,
+    sync_visa_data,
+    get_visa_lookup,
+    get_last_visa_sync
 )
-from config import SHIFT_TYPE_LIMITS, EMPLOYEE_HOUR_LIMITS, ALLOWED_COMBINATIONS
+from config import SHIFT_TYPE_LIMITS, EMPLOYEE_HOUR_LIMITS, ALLOWED_COMBINATIONS, VISA_HOUR_RULES
 
 # Page configuration
 st.set_page_config(
@@ -126,6 +130,12 @@ with st.sidebar:
             st.write(f"• {svc} + {req}")
         if len(ALLOWED_COMBINATIONS) > 5:
             st.write(f"... and {len(ALLOWED_COMBINATIONS) - 5} more")
+
+    with st.expander("🛂 Visa Hour Rules", expanded=False):
+        last_sync = get_last_visa_sync()
+        st.write(f"**Last visa sync:** {last_sync or 'Never'}")
+        for status, rule in VISA_HOUR_RULES.items():
+            st.write(f"**{status}:** {rule.get('operator', '<=')} {rule.get('value', 0)} hours/week")
     
     st.markdown("---")
     st.info("💡 Edit rules in `config.py`")
@@ -145,8 +155,16 @@ with tab1:
     
     if uploaded_file is not None:
         try:
-            # Read CSV
-            df = pd.read_csv(uploaded_file)
+            # Read CSV with encoding fallback (Excel exports are often cp1252)
+            try:
+                df = pd.read_csv(uploaded_file)
+            except UnicodeDecodeError:
+                uploaded_file.seek(0)
+                try:
+                    df = pd.read_csv(uploaded_file, encoding='cp1252')
+                except UnicodeDecodeError:
+                    uploaded_file.seek(0)
+                    df = pd.read_csv(uploaded_file, encoding='latin-1')
             df.columns = df.columns.str.strip().str.replace(r'\s+', ' ', regex=True)
             df.columns = df.columns.str.replace('Desciption', 'Description', regex=False)
             df.columns = df.columns.str.replace('and Time', 'And Time', regex=False)
@@ -188,7 +206,17 @@ with tab1:
                     st.session_state.is_processing = True
 
                     try:
-                        progress = st.progress(0, text="Starting analysis...")
+                        progress = st.progress(0, text="Syncing employee visa data...")
+
+                        # Sync visa data before analysis begins
+                        visa_ok, visa_count, visa_msg = sync_visa_data()
+                        if visa_ok:
+                            st.info(f"🔄 {visa_msg}")
+                        else:
+                            st.warning(f"⚠️ {visa_msg}. Using last synced visa data.")
+                        visa_lookup = get_visa_lookup()
+
+                        progress.progress(0, text="Starting analysis...")
                         df = st.session_state.df.copy()
                         df['_row_num'] = range(2, len(df) + 2)
                         total_rows = len(df)
@@ -227,6 +255,11 @@ with tab1:
                             # Update progress bar
                             progress.progress(end / total_rows, text=f"Processed {end} of {total_rows} rows")
 
+                        # Visa weekly-hours check - runs on the FULL dataframe
+                        # (weekly aggregation per employee cannot be chunked)
+                        progress.progress(1.0, text="Checking visa working hours...")
+                        visa_violations = check_visa_hour_violations(df, visa_lookup)
+
                         # Finalize progress bar
                         progress.progress(1.0, text="✅ Analysis complete")
 
@@ -236,7 +269,8 @@ with tab1:
                             'over_allocations': over_allocs,
                             'unallowed_combinations': unallowed,
                             'rate_mismatches': rate_mismatches,
-                            'total_issues': len(duplicates) + len(over_allocs) + len(unallowed) + len(rate_mismatches)
+                            'visa_violations': visa_violations,
+                            'total_issues': len(duplicates) + len(over_allocs) + len(unallowed) + len(rate_mismatches) + len(visa_violations)
                         }
 
                         st.session_state.results = results
@@ -273,7 +307,7 @@ with tab2:
         st.header("Analysis Results")
 
         # Summary metrics
-        col1, col2, col3, col4,col5 = st.columns(5)
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
         with col1:
             st.metric("Total Issues", results['total_issues'])
         with col2:
@@ -284,6 +318,8 @@ with tab2:
             st.metric("Invalid Combos", len(results['unallowed_combinations']))
         with col5:
             st.metric("Rate Mismatches", len(results['rate_mismatches']))
+        with col6:
+            st.metric("Visa Violations", len(results['visa_violations']))
         st.markdown("---")
 
         # Pagination helper
@@ -326,6 +362,9 @@ with tab2:
 
         rate_df = pd.DataFrame(results['rate_mismatches'])
         show_paginated_df(rate_df, "🟣 Rate Mismatches", "rate")
+
+        visa_df = pd.DataFrame(results['visa_violations'])
+        show_paginated_df(visa_df, "🔵 Visa Hours Violations", "visa")
 
         if results['total_issues'] == 0:
             st.success("✅ No issues found! All allocations are valid.")
@@ -492,7 +531,7 @@ with tab4:
             st.subheader(f"Results from {selected_timestamp}")
             
             # Summary
-            col1, col2, col3, col4, col5 = st.columns(5)
+            col1, col2, col3, col4, col5, col6 = st.columns(6)
             with col1:
                 st.metric("Total Issues", len(history_df))
             with col2:
@@ -503,6 +542,8 @@ with tab4:
                 st.metric("Invalid Combos", len(history_df[history_df['issue_type'] == 'Unallowed Combination']))
             with col5:
                 st.metric("Rate Mismatches", len(history_df[history_df['issue_type'] == 'Rate Card Mismatch']))
+            with col6:
+                st.metric("Visa Violations", len(history_df[history_df['issue_type'] == 'Visa Hours Violation']))
             
             st.markdown("---")
             

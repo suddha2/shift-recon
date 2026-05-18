@@ -3,7 +3,7 @@
 
 import re
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from config import SHIFT_TYPE_LIMITS, EMPLOYEE_HOUR_LIMITS, DEFAULT_HOUR_LIMIT, ALLOWED_COMBINATIONS,RATE_CARD_MAP, VISA_HOUR_RULES
 
 
@@ -20,21 +20,36 @@ def canonical_name(name):
     return ' '.join(sorted(t.lower() for t in tokens))
 
 def parse_datetime(dt_str):
-    """Parse datetime string to datetime object with UK/European date format (DD/MM/YYYY)"""
-    if pd.isna(dt_str) or dt_str == '':
+    """
+    Parse a datetime string using UK/European format (DD/MM/YYYY).
+    Returns None for blank, zero, or implausible values - e.g. numeric 0
+    cells, which pd.to_datetime would otherwise turn into 1970-01-01.
+    """
+    if pd.isna(dt_str):
+        return None
+    # Convert to string first: a numeric 0 would parse to the epoch,
+    # but the string "0" / "0.0" fails to parse and is rejected.
+    s = str(dt_str).strip()
+    if s == '' or s.lower() in ('nan', 'nat', 'none'):
         return None
     try:
         # Force dayfirst=True for DD/MM/YYYY format (UK/European dates)
-        return pd.to_datetime(dt_str, dayfirst=True)
-    except:
+        dt = pd.to_datetime(s, dayfirst=True)
+    except Exception:
         return None
+    # Reject epoch/Excel-zero placeholders (1970, 1900, etc.)
+    if pd.isna(dt) or dt.year < 2000:
+        return None
+    return dt
 
 def get_week_number(dt):
-    """Get week number (Monday=0) and year"""
+    """Get ISO week number and ISO year (weeks run Monday-Sunday)"""
     if dt is None or pd.isna(dt):
         return None, None
-    # Get ISO week (Monday as first day)
-    return dt.isocalendar()[1], dt.year
+    # Use ISO year (not calendar year) so a single Mon-Sun week always
+    # maps to exactly one (year, week) pair, even across year boundaries.
+    iso = dt.isocalendar()
+    return iso[1], iso[0]
 
 def calculate_hours(start_dt, end_dt):
     """Calculate hours between two datetime objects"""
@@ -367,9 +382,10 @@ def check_visa_hour_violations(df, visa_lookup):
 
     visa_lookup: dict mapping employee_name -> visa_status (from the visa table)
 
-    Employees with no visa info, or a visa status with no defined rule,
-    are flagged as 'Missing Visa Info'. Must run on the FULL dataframe
-    (weekly aggregation cannot be chunked).
+    Employees with no visa info in the feed are flagged as 'Missing Visa
+    Info'. Visa statuses that have no rule in VISA_HOUR_RULES are skipped
+    (not checked). Must run on the FULL dataframe (weekly aggregation
+    cannot be chunked).
     Returns list of issue dictionaries.
     """
     issues = []
@@ -392,6 +408,10 @@ def check_visa_hour_violations(df, visa_lookup):
         total_hours = group['hours'].sum()
         row_numbers = group['_row_num'].tolist()
         week_label = f"{int(year)}-W{int(week):02d}"
+        # Monday-Sunday calendar range for this ISO week
+        week_start = date.fromisocalendar(int(year), int(week), 1)
+        week_end = date.fromisocalendar(int(year), int(week), 7)
+        week_range = f"{week_start} to {week_end}"
 
         visa_status = visa_lookup.get(canonical_name(emp))
 
@@ -414,21 +434,8 @@ def check_visa_hour_violations(df, visa_lookup):
 
         rule = VISA_HOUR_RULES.get(visa_status)
 
-        # Visa status exists but has no rule defined
+        # Visa status has no rule defined - intentionally not checked
         if rule is None:
-            if emp not in flagged_missing:
-                flagged_missing.add(emp)
-                issues.append({
-                    'issue_type': 'Missing Visa Info',
-                    'employee_name': emp,
-                    'date': None,
-                    'week': None,
-                    'actual_hours': None,
-                    'limit_hours': None,
-                    'shift_type': visa_status,
-                    'details': f"Visa status '{visa_status}' has no rule defined in VISA_HOUR_RULES",
-                    'row_numbers': ', '.join(map(str, row_numbers))
-                })
             continue
 
         operator = rule.get('operator', '<=')
@@ -456,13 +463,13 @@ def check_visa_hour_violations(df, visa_lookup):
             issues.append({
                 'issue_type': 'Visa Hours Violation',
                 'employee_name': emp,
-                'date': None,
+                'date': week_range,
                 'week': week_label,
                 'actual_hours': round(total_hours, 1),
                 'limit_hours': limit_value,
                 'shift_type': visa_status,
                 'details': f"{total_hours:.1f} hours worked in week {week_label} "
-                           f"({visa_status} visa) - {violation_msg}",
+                           f"({week_range}) ({visa_status} visa) - {violation_msg}",
                 'row_numbers': ', '.join(map(str, row_numbers))
             })
 

@@ -3,3 +3,5 @@ __pycache__/database.cpython-312.pyc
 workforce_analysis.db
 __pycache__/config.cpython-312.pyc
 shift-recon-deploy.zip
+*.csv
+*:Zone.Identifier

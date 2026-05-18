@@ -391,6 +391,10 @@ def check_visa_hour_violations(df, visa_lookup):
     issues = []
 
     df = df.copy()
+    # Only "Shift" service types count toward visa working hours
+    # (same filter as check_duplicate_allocations). Support / Training /
+    # Shadow / Sleep In Support etc. are excluded.
+    df = df[df['Actual Service Type Description'].str.contains('shift', case=False, na=False)]
     df['start_dt'] = df['Actual Start Date And Time'].apply(parse_datetime)
     df['end_dt'] = df['Actual End Date And Time'].apply(parse_datetime)
     df['hours'] = df.apply(lambda row: calculate_hours(row['start_dt'], row['end_dt']), axis=1)

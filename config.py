@@ -149,13 +149,13 @@ APP_EMP_TYPE_COL = "EE.EmployeeType"
 VISA_HOUR_RULES = {
     "Student Visa":                 {"operator": "<=", "value": 20},
     "Supplementary Worker":         {"operator": "<=", "value": 20},
-    "Skilled Worker Visa":          {"operator": ">=", "value": 47.5},
-    "Graduate Visa":                {"operator": ">=", "value": 47.5},
-    "Dependent Visa":               {"operator": ">=", "value": 47.5},
-    "UK National":                  {"operator": ">=", "value": 47.5},
-    "EU Settlement status":         {"operator": ">=", "value": 47.5},
-    "Leave to Remain Indefinitely": {"operator": ">=", "value": 47.5},
-    "International Visa Migrant":   {"operator": ">=", "value": 47.5},
+    "Skilled Worker Visa":          {"operator": ">=", "value": 37.5},
+    # "Graduate Visa":                {"operator": ">=", "value": 37.5},
+    # "Dependent Visa":               {"operator": ">=", "value": 37.5},
+    # "UK National":                  {"operator": ">=", "value": 37.5},
+    # "EU Settlement status":         {"operator": ">=", "value": 37.5},
+    # "Leave to Remain Indefinitely": {"operator": ">=", "value": 37.5},
+    # "International Visa Migrant":   {"operator": ">=", "value": 37.5},
     # Add more visa statuses here as: "Visa Status": {"operator": "<=", "value": hours}
 }
 

@@ -7,11 +7,12 @@ import pandas as pd
 import requests
 from datetime import datetime
 from config import (
-    DATABASE_NAME, ANALYSIS_TABLE, VISA_TABLE,
+    DATABASE_NAME, ANALYSIS_TABLE, VISA_TABLE, PEOPLE_HR_TABLE,
     APP_EMP_URL, APP_EMP_AUTH, APP_EMP_TIMEOUT,
     APP_EMP_NAME_COL, APP_EMP_TYPE_COL
 )
 from analyzer import canonical_name
+from people_hr import fetch_all_employees
 
 def init_database():
     """Initialize SQLite database and create tables if they don't exist"""
@@ -44,6 +45,29 @@ def init_database():
             updated_at TEXT
         )
     ''')
+
+    # People HR employee ID lookup (wiped + reloaded per analysis run)
+    cursor.execute(f'''
+        CREATE TABLE IF NOT EXISTS {PEOPLE_HR_TABLE} (
+            employee_name TEXT PRIMARY KEY,
+            people_hr_id TEXT,
+            updated_at TEXT
+        )
+    ''')
+
+    # Idempotent column adds for the leave enrichment fields on
+    # analysis_results. Older DBs created before this feature won't have
+    # them; ALTER TABLE ADD COLUMN raises if it already exists, so we
+    # swallow that specific case.
+    for col, coltype in (
+        ("leave", "TEXT"),
+        ("leave_hours", "REAL"),
+        ("leave_details", "TEXT"),
+    ):
+        try:
+            cursor.execute(f"ALTER TABLE {ANALYSIS_TABLE} ADD COLUMN {col} {coltype}")
+        except sqlite3.OperationalError:
+            pass
 
     conn.commit()
     conn.close()
@@ -120,6 +144,65 @@ def get_last_visa_sync():
     conn.close()
     return result[0] if result and result[0] else None
 
+
+def sync_people_hr_employees():
+    """Fetch the full People HR employee roster and replace the lookup table.
+
+    Names are stored as 'First Last' so that canonical_name() matches them
+    against the 'Last, First' format used in the workforce CSV.
+
+    Returns: (success: bool, count: int, message: str)
+    """
+    try:
+        records = fetch_all_employees()
+    except Exception as e:
+        return False, 0, f"People HR sync failed: {e}"
+
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    rows = []
+    for rec in records:
+        name = (rec.get("full_name") or "").strip()
+        emp_id = (rec.get("employee_id") or "").strip()
+        if name and emp_id:
+            rows.append((name, emp_id, timestamp))
+
+    conn = sqlite3.connect(DATABASE_NAME)
+    cursor = conn.cursor()
+    cursor.execute(f"DELETE FROM {PEOPLE_HR_TABLE}")
+    cursor.executemany(
+        f"INSERT OR REPLACE INTO {PEOPLE_HR_TABLE} (employee_name, people_hr_id, updated_at) VALUES (?, ?, ?)",
+        rows
+    )
+    conn.commit()
+    conn.close()
+    return True, len(rows), f"Synced {len(rows)} People HR employees"
+
+
+def get_people_hr_id_lookup():
+    """Return {canonical_name: people_hr_id} for all synced employees."""
+    conn = sqlite3.connect(DATABASE_NAME)
+    cursor = conn.cursor()
+    try:
+        cursor.execute(f"SELECT employee_name, people_hr_id FROM {PEOPLE_HR_TABLE}")
+        rows = cursor.fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    conn.close()
+    return {canonical_name(name): emp_id for name, emp_id in rows}
+
+
+def get_last_people_hr_sync():
+    """Return the timestamp of the most recent People HR sync, or None."""
+    conn = sqlite3.connect(DATABASE_NAME)
+    cursor = conn.cursor()
+    try:
+        cursor.execute(f"SELECT MAX(updated_at) FROM {PEOPLE_HR_TABLE}")
+        result = cursor.fetchone()
+    except sqlite3.OperationalError:
+        result = None
+    conn.close()
+    return result[0] if result and result[0] else None
+
 def save_analysis_results(issues_dict, analysis_timestamp=None):
     """
     Save analysis results to database
@@ -144,15 +227,18 @@ def save_analysis_results(issues_dict, analysis_timestamp=None):
     for issue in all_issues:
         records.append({
             'analysis_timestamp': analysis_timestamp,
-            'issue_type': issue['issue_type'],
-            'employee_name': issue['employee_name'],
-            'issue_date': str(issue['date']) if issue['date'] else None,
-            'week': issue['week'],
-            'actual_hours':issue['actual_hours'],
-            'limit_hours':issue['limit_hours'],
-            'shift_type': issue['shift_type'],
-            'details': issue['details'],
-            'row_numbers': issue['row_numbers']
+            'issue_type': issue.get('issue_type'),
+            'employee_name': issue.get('employee_name'),
+            'issue_date': str(issue['date']) if issue.get('date') else None,
+            'week': issue.get('week'),
+            'actual_hours': issue.get('actual_hours'),
+            'limit_hours': issue.get('limit_hours'),
+            'shift_type': issue.get('shift_type'),
+            'details': issue.get('details'),
+            'row_numbers': issue.get('row_numbers'),
+            'leave': issue.get('leave', 'N/A'),
+            'leave_hours': issue.get('leave_hours'),
+            'leave_details': issue.get('leave_details', ''),
         })
     
     if records:

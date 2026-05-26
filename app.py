@@ -29,8 +29,12 @@ from database import (
     export_to_excel,
     sync_visa_data,
     get_visa_lookup,
-    get_last_visa_sync
+    get_last_visa_sync,
+    sync_people_hr_employees,
+    get_people_hr_id_lookup,
+    get_last_people_hr_sync,
 )
+from analyzer import parse_datetime
 from config import SHIFT_TYPE_LIMITS, EMPLOYEE_HOUR_LIMITS, ALLOWED_COMBINATIONS, VISA_HOUR_RULES
 
 # Page configuration
@@ -134,6 +138,8 @@ with st.sidebar:
     with st.expander("🛂 Visa Hour Rules", expanded=False):
         last_sync = get_last_visa_sync()
         st.write(f"**Last visa sync:** {last_sync or 'Never'}")
+        last_phr_sync = get_last_people_hr_sync()
+        st.write(f"**Last People HR sync:** {last_phr_sync or 'Never'}")
         for status, rule in VISA_HOUR_RULES.items():
             st.write(f"**{status}:** {rule.get('operator', '<=')} {rule.get('value', 0)} hours/week")
     
@@ -216,6 +222,16 @@ with tab1:
                             st.warning(f"⚠️ {visa_msg}. Using last synced visa data.")
                         visa_lookup = get_visa_lookup()
 
+                        # Sync People HR roster (used to enrich below-minimum
+                        # visa violations with holiday/absence context)
+                        progress.progress(0, text="Syncing People HR employees...")
+                        phr_ok, phr_count, phr_msg = sync_people_hr_employees()
+                        if phr_ok:
+                            st.info(f"🔄 {phr_msg}")
+                        else:
+                            st.warning(f"⚠️ {phr_msg}. Leave column will show 'Unknown' for visa shortfalls.")
+                        people_hr_lookup = get_people_hr_id_lookup()
+
                         progress.progress(0, text="Starting analysis...")
                         df = st.session_state.df.copy()
                         df['_row_num'] = range(2, len(df) + 2)
@@ -258,7 +274,21 @@ with tab1:
                         # Visa weekly-hours check - runs on the FULL dataframe
                         # (weekly aggregation per employee cannot be chunked)
                         progress.progress(1.0, text="Checking visa working hours...")
-                        visa_violations = check_visa_hour_violations(df, visa_lookup)
+
+                        # Period bounds drive the People HR holiday/absence fetches.
+                        # One call per affected employee covers the full CSV span,
+                        # then weekly violations are sliced from the cached records.
+                        start_series = df['Actual Start Date And Time'].apply(parse_datetime).dropna()
+                        end_series = df['Actual End Date And Time'].apply(parse_datetime).dropna()
+                        period_start = start_series.min().date() if not start_series.empty else None
+                        period_end = end_series.max().date() if not end_series.empty else None
+
+                        visa_violations = check_visa_hour_violations(
+                            df, visa_lookup,
+                            people_hr_lookup=people_hr_lookup,
+                            period_start=period_start,
+                            period_end=period_end,
+                        )
 
                         # Finalize progress bar
                         progress.progress(1.0, text="✅ Analysis complete")

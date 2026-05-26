@@ -375,12 +375,21 @@ def check_rate_mismatches(df):
 
 
 
-def check_visa_hour_violations(df, visa_lookup):
+def check_visa_hour_violations(df, visa_lookup, people_hr_lookup=None,
+                                period_start=None, period_end=None):
     """
     Check weekly (Monday-Sunday) worked hours per employee against
     visa-status-based rules in VISA_HOUR_RULES.
 
     visa_lookup: dict mapping employee_name -> visa_status (from the visa table)
+    people_hr_lookup: optional dict mapping canonical_name -> People HR EmployeeId.
+        When provided together with period_start/period_end, BELOW-MINIMUM
+        violations are enriched with holiday + absence info from People HR
+        so the operator can see whether the shortfall is explained by leave.
+        Holiday + absence are fetched ONCE per affected employee for the
+        full period and then sliced per violating week.
+    period_start, period_end: date bounds (inclusive) used for the People HR
+        holiday/absence fetches. Typically min/max of the CSV's actual dates.
 
     Employees with no visa info in the feed are flagged as 'Missing Visa
     Info'. Visa statuses that have no rule in VISA_HOUR_RULES are skipped
@@ -389,6 +398,28 @@ def check_visa_hour_violations(df, visa_lookup):
     Returns list of issue dictionaries.
     """
     issues = []
+
+    # Per-employee cache of People HR leave records. Populated lazily the
+    # first time we hit a below-minimum violation for a given employee.
+    # Each entry: emp_id -> {'holiday': [...], 'absence': [...], 'error': str|None}
+    leave_cache = {}
+
+    def _get_leave_records(emp_id):
+        if emp_id in leave_cache:
+            return leave_cache[emp_id]
+        from people_hr import fetch_holiday, fetch_absence
+        try:
+            hol = fetch_holiday(emp_id, period_start, period_end)
+        except Exception as e:
+            leave_cache[emp_id] = {'holiday': [], 'absence': [], 'error': f"holiday: {e}"}
+            return leave_cache[emp_id]
+        try:
+            abs_ = fetch_absence(emp_id, period_start, period_end)
+        except Exception as e:
+            leave_cache[emp_id] = {'holiday': hol, 'absence': [], 'error': f"absence: {e}"}
+            return leave_cache[emp_id]
+        leave_cache[emp_id] = {'holiday': hol, 'absence': abs_, 'error': None}
+        return leave_cache[emp_id]
 
     df = df.copy()
     # Only "Shift" service types count toward visa working hours
@@ -447,11 +478,13 @@ def check_visa_hour_violations(df, visa_lookup):
 
         violation = False
         violation_msg = ""
+        is_below_minimum = False
         if operator == "<=" and total_hours > limit_value:
             violation = True
             violation_msg = f"exceeds maximum of {limit_value} hours/week"
         elif operator == ">=" and total_hours < limit_value:
             violation = True
+            is_below_minimum = True
             violation_msg = f"below minimum of {limit_value} hours/week"
         elif operator == "<" and total_hours >= limit_value:
             violation = True
@@ -464,6 +497,29 @@ def check_visa_hour_violations(df, visa_lookup):
             violation_msg = f"must be exactly {limit_value} hours/week"
 
         if violation:
+            # Default leave fields - only populated for below-minimum violations
+            leave_status = "N/A"
+            leave_hours = None
+            leave_details = ""
+
+            if (is_below_minimum and people_hr_lookup is not None
+                    and period_start is not None and period_end is not None):
+                emp_id = people_hr_lookup.get(canonical_name(emp))
+                if not emp_id:
+                    leave_status = "Unknown"
+                    leave_details = f"No People HR ID for '{emp}'"
+                else:
+                    cached = _get_leave_records(emp_id)
+                    if cached.get('error'):
+                        leave_status = "Unknown"
+                        leave_details = f"API error: {cached['error']}"
+                    else:
+                        from people_hr import summarize_leave_for_week
+                        leave_status, leave_hours, leave_details = summarize_leave_for_week(
+                            cached['holiday'], cached['absence'],
+                            week_start, week_end
+                        )
+
             issues.append({
                 'issue_type': 'Visa Hours Violation',
                 'employee_name': emp,
@@ -474,7 +530,10 @@ def check_visa_hour_violations(df, visa_lookup):
                 'shift_type': visa_status,
                 'details': f"{total_hours:.1f} hours worked in week {week_label} "
                            f"({week_range}) ({visa_status} visa) - {violation_msg}",
-                'row_numbers': ', '.join(map(str, row_numbers))
+                'row_numbers': ', '.join(map(str, row_numbers)),
+                'leave': leave_status,
+                'leave_hours': leave_hours,
+                'leave_details': leave_details,
             })
 
     return issues

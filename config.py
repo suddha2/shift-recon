@@ -160,6 +160,32 @@ VISA_HOUR_RULES = {
 }
 
 # ============================================
+# PEOPLE HR API
+# ============================================
+# Used to enrich below-minimum visa hour violations with holiday/absence
+# context, so the operator can see whether a weekly shortfall is explained
+# by approved leave.
+PEOPLE_HR_BASE_URL = "https://api.peoplehr.net"
+PEOPLE_HR_API_KEY  = ""          # fill in your key
+PEOPLE_HR_TIMEOUT  = 30          # seconds
+
+PEOPLE_HR_EMPLOYEE_RESOURCE = "/Employee"
+PEOPLE_HR_HOLIDAY_RESOURCE  = "/Holiday"
+PEOPLE_HR_ABSENCE_RESOURCE  = "/Absence"
+
+PEOPLE_HR_ACTION_EMPLOYEES = "GetAllEmployeeDetail"
+PEOPLE_HR_ACTION_HOLIDAY   = "GetHolidayDetail"
+PEOPLE_HR_ACTION_ABSENCE   = "GetAbsenceDetail"
+
+# Used to convert People HR absence days into hours. Holiday already
+# returns minutes so this only affects absence records.
+STANDARD_WORK_DAY_HOURS = 7.5
+
+# Table holding employee name -> People HR EmployeeId (wiped and reloaded
+# on every analysis run, same pattern as the visa table).
+PEOPLE_HR_TABLE = "people_hr_employees"
+
+# ============================================
 # DATABASE CONFIGURATION
 # ============================================
 DATABASE_NAME = "workforce_analysis.db"

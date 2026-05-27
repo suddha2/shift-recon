@@ -19,6 +19,7 @@ REQUIRED_FILES=(
     analyzer.py
     config.py
     database.py
+    people_hr.py
     config.yaml
     requirements.txt
     README.md

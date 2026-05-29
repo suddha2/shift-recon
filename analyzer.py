@@ -19,19 +19,55 @@ def canonical_name(name):
     tokens = [t for t in re.split(r'[,\-\s]+', str(name)) if t]
     return ' '.join(sorted(t.lower() for t in tokens))
 
+# Pre-compiled patterns + constants used by parse_datetime.
+# Excel epoch is 1899-12-30 (the "Lotus 1-2-3 leap-year bug" baseline),
+# so a serial of N days yields 1899-12-30 + N. Restrict acceptance to a
+# plausible serial range (~year 2000 -> ~year 2173) so that small numeric
+# cells like "0", "5", "1.6667" in duration columns are still rejected.
+_NUMERIC_STR_RE = re.compile(r'^-?\d+(\.\d+)?$')
+_EXCEL_EPOCH = datetime(1899, 12, 30)
+_EXCEL_SERIAL_MIN = 36500   # ~2000-01-01
+_EXCEL_SERIAL_MAX = 100000  # ~2173-10-15
+
+
 def parse_datetime(dt_str):
     """
-    Parse a datetime string using UK/European format (DD/MM/YYYY).
-    Returns None for blank, zero, or implausible values - e.g. numeric 0
-    cells, which pd.to_datetime would otherwise turn into 1970-01-01.
+    Parse a datetime value using UK/European format (DD/MM/YYYY).
+
+    Falls back to Excel serial-number parsing (days since 1899-12-30) for
+    plain numeric strings in a sensible range. Rows saved from Excel where
+    the cell format was Number / General rather than Date (e.g. some
+    Recon CSV exports of the V5 sheet) leave dates as raw serials like
+    "46143.26397"; without this fallback those rows were silently dropped
+    from every analysis. See the V5 (2) Golders Rise rows for context.
+
+    Returns None for blank, NaN, or implausible values.
     """
     if pd.isna(dt_str):
         return None
-    # Convert to string first: a numeric 0 would parse to the epoch,
-    # but the string "0" / "0.0" fails to parse and is rejected.
     s = str(dt_str).strip()
     if s == '' or s.lower() in ('nan', 'nat', 'none'):
         return None
+
+    # Pure-numeric strings take the Excel-serial path. We branch early so
+    # pd.to_datetime never sees them - it would otherwise interpret a number
+    # as nanoseconds since 1970 and produce a year-1970 result that we'd
+    # have to reject anyway.
+    if _NUMERIC_STR_RE.match(s):
+        try:
+            n = float(s)
+        except ValueError:
+            return None
+        if not (_EXCEL_SERIAL_MIN <= n <= _EXCEL_SERIAL_MAX):
+            return None
+        try:
+            dt = pd.Timestamp(_EXCEL_EPOCH) + pd.Timedelta(days=n)
+        except Exception:
+            return None
+        if pd.isna(dt) or dt.year < 2000:
+            return None
+        return dt
+
     try:
         # Force dayfirst=True for DD/MM/YYYY format (UK/European dates)
         dt = pd.to_datetime(s, dayfirst=True)

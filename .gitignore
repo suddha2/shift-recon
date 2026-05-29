@@ -1,7 +1,8 @@
-__pycache__/analyzer.cpython-312.pyc
-__pycache__/database.cpython-312.pyc
+__pycache__/
 workforce_analysis.db
-__pycache__/config.cpython-312.pyc
 shift-recon-deploy.zip
 *.csv
 *:Zone.Identifier
+.venv/
+*.xlsx
+*.xlsm

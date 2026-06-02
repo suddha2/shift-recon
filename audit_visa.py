@@ -15,7 +15,7 @@ from collections import defaultdict
 
 import pandas as pd
 
-from analyzer import parse_datetime, get_week_number, calculate_hours
+from analyzer import parse_datetime, get_week_number, calculate_hours, is_visa_hour_eligible
 
 
 def read_csv(path):
@@ -69,8 +69,9 @@ def main():
             "end": end,
             "hours": calculate_hours(start, end),
             "week": (yr, wk),
-            # Only "Shift" service types count toward visa hours
-            "counts": "shift" in service.lower(),
+            # Visa-hour eligibility: 'Shift' types EXCEPT Sleep In variants.
+            # See analyzer.is_visa_hour_eligible for the rule.
+            "counts": is_visa_hour_eligible(service),
         })
 
     groups = defaultdict(list)

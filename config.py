@@ -159,6 +159,35 @@ VISA_HOUR_RULES = {
     # Add more visa statuses here as: "Visa Status": {"operator": "<=", "value": hours}
 }
 
+# Service types whose hours count toward the weekly visa-hour totals.
+# Match is exact but case-insensitive and whitespace-tolerant, so
+# "Paid Sleep In " or "ad hoc shift" still match. Any service type NOT
+# listed here is excluded from the visa hours sum:
+#   - Support / Shadow (no "Shift" suffix) - duplicate booking of the same actual work
+#   - Sleep In Shift / Sleep In Support - unpaid overnight cover
+#   - anything else not enumerated below
+# Add or remove entries here when policy or shift-naming changes.
+VISA_HOUR_ELIGIBLE_SHIFT_TYPES = (
+    "Care Call Shift",
+    "Floating Shift",
+    "Waking Night Shift",
+    "L - Day Shift",
+    "Day Shift",
+    "Shadow Shift",
+    "Training",
+    "Complex Day Shift",
+    "Complex Floating Shift",
+    "Paid Sleep In",
+    "Prelim Waking Night Shift",
+    "Complex Waking Night",
+    "Ad Hoc Shift",
+    "Community Care Call",
+    "Driver Shift",
+    "Prelim Day Shift",
+    "Prelim Floating Shift",
+    "On Call Shift",
+)
+
 # ============================================
 # PEOPLE HR API
 # ============================================

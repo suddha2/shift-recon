@@ -4,7 +4,20 @@
 import re
 import pandas as pd
 from datetime import datetime, timedelta, date
-from config import SHIFT_TYPE_LIMITS, EMPLOYEE_HOUR_LIMITS, DEFAULT_HOUR_LIMIT, ALLOWED_COMBINATIONS,RATE_CARD_MAP, VISA_HOUR_RULES
+from config import (
+    SHIFT_TYPE_LIMITS, EMPLOYEE_HOUR_LIMITS, DEFAULT_HOUR_LIMIT,
+    ALLOWED_COMBINATIONS, RATE_CARD_MAP, VISA_HOUR_RULES,
+    VISA_HOUR_ELIGIBLE_SHIFT_TYPES,
+)
+
+
+# Build a normalized lookup set once at import time. Matching strips
+# surrounding whitespace and lowercases both sides so trivial naming
+# drift in the source CSV (e.g. "Paid Sleep In ", "DAY SHIFT") still
+# matches the config entries.
+_VISA_ELIGIBLE_SET = {
+    str(s).strip().lower() for s in VISA_HOUR_ELIGIBLE_SHIFT_TYPES
+}
 
 
 def canonical_name(name):
@@ -93,6 +106,25 @@ def calculate_hours(start_dt, end_dt):
         return 0
     delta = end_dt - start_dt
     return delta.total_seconds() / 3600
+
+
+def is_visa_hour_eligible(service_type):
+    """
+    Return True if a row's hours should count toward visa weekly-hour
+    totals.
+
+    Uses the explicit allowlist VISA_HOUR_ELIGIBLE_SHIFT_TYPES in
+    config.py - case-insensitive, whitespace-tolerant exact match.
+    To add or remove eligible types, edit that tuple in config.py.
+
+    Centralised here so check_visa_hour_violations, audit_visa.py,
+    and the verification tools all use exactly the same definition.
+    """
+    if service_type is None:
+        return False
+    if pd.isna(service_type):
+        return False
+    return str(service_type).strip().lower() in _VISA_ELIGIBLE_SET
 
 def check_duplicate_allocations(df):
     """
@@ -458,10 +490,12 @@ def check_visa_hour_violations(df, visa_lookup, people_hr_lookup=None,
         return leave_cache[emp_id]
 
     df = df.copy()
-    # Only "Shift" service types count toward visa working hours
-    # (same filter as check_duplicate_allocations). Support / Training /
-    # Shadow / Sleep In Support etc. are excluded.
-    df = df[df['Actual Service Type Description'].str.contains('shift', case=False, na=False)]
+    # Only "Shift" service types count toward visa working hours.
+    # Support / Training / Shadow / Sleep In Support etc. are excluded
+    # because they mirror the same actual work (would double-count) or
+    # are not paid working time. Sleep In Shift is also excluded - it's
+    # unpaid overnight cover. See is_visa_hour_eligible().
+    df = df[df['Actual Service Type Description'].apply(is_visa_hour_eligible)]
     df['start_dt'] = df['Actual Start Date And Time'].apply(parse_datetime)
     df['end_dt'] = df['Actual End Date And Time'].apply(parse_datetime)
     df['hours'] = df.apply(lambda row: calculate_hours(row['start_dt'], row['end_dt']), axis=1)

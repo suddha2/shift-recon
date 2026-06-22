@@ -7,6 +7,7 @@
 # Action. Holiday filters to Status == "Approved"; absence records are
 # all assumed valid (the API has no separate approval flag).
 
+import time
 from datetime import date, datetime, timedelta
 
 import requests
@@ -21,8 +22,39 @@ from config import (
     PEOPLE_HR_ACTION_EMPLOYEES,
     PEOPLE_HR_ACTION_HOLIDAY,
     PEOPLE_HR_ACTION_ABSENCE,
+    PEOPLE_HR_BATCH_SIZE,
+    PEOPLE_HR_BATCH_REST_SECONDS,
     STANDARD_WORK_DAY_HOURS,
 )
+
+
+# Module-level throttle state. Counts calls in the current burst. If a
+# previous burst was long enough ago (more than the rest window) the
+# counter resets naturally without forcing an unnecessary sleep on the
+# next analysis run.
+_call_count = 0
+_last_call_at = 0.0
+
+
+def _throttle():
+    """Block briefly so we never exceed PHR's ~50 calls/minute cap.
+
+    Up to PEOPLE_HR_BATCH_SIZE calls in a burst, then sleep
+    PEOPLE_HR_BATCH_REST_SECONDS before the next burst. If the previous
+    call was long enough ago that the cap has reset, start a fresh batch
+    without sleeping.
+    """
+    global _call_count, _last_call_at
+    now = time.time()
+    # If the last call was more than 60s ago, PHR's 60s window has rolled
+    # past so we can start a fresh batch without sleeping.
+    if now - _last_call_at > 60:
+        _call_count = 0
+    if _call_count >= PEOPLE_HR_BATCH_SIZE:
+        time.sleep(PEOPLE_HR_BATCH_REST_SECONDS)
+        _call_count = 0
+    _call_count += 1
+    _last_call_at = time.time()
 
 
 def _post(resource, payload):
@@ -30,7 +62,10 @@ def _post(resource, payload):
 
     Raises RuntimeError on transport failure or when the API reports
     IsError == "true". Callers convert these into Leave=Unknown.
+
+    Throttled to stay under PHR's 50 calls/minute cap; see _throttle().
     """
+    _throttle()
     url = PEOPLE_HR_BASE_URL.rstrip("/") + resource
     body = {"APIKey": PEOPLE_HR_API_KEY, **payload}
     resp = requests.post(url, json=body, timeout=PEOPLE_HR_TIMEOUT)

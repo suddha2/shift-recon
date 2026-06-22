@@ -195,7 +195,7 @@ VISA_HOUR_ELIGIBLE_SHIFT_TYPES = (
 # context, so the operator can see whether a weekly shortfall is explained
 # by approved leave.
 PEOPLE_HR_BASE_URL = "https://api.peoplehr.net"
-PEOPLE_HR_API_KEY  = ""          # fill in your key
+PEOPLE_HR_API_KEY  = "fb1a6844-d8d5-4ec7-a4d1-e0f6472318d3"          # fill in your key
 PEOPLE_HR_TIMEOUT  = 30          # seconds
 
 PEOPLE_HR_EMPLOYEE_RESOURCE = "/Employee"
@@ -205,6 +205,19 @@ PEOPLE_HR_ABSENCE_RESOURCE  = "/Absence"
 PEOPLE_HR_ACTION_EMPLOYEES = "GetAllEmployeeDetail"
 PEOPLE_HR_ACTION_HOLIDAY   = "GetHolidayDetail"
 PEOPLE_HR_ACTION_ABSENCE   = "GetAbsenceDetail"
+
+# People HR caps requests at ~50 calls per 60-second sliding window.
+# Over the limit it returns an empty Result + Message='API calls will be
+# limited to a 50 per minute', with IsError=None - a SILENT failure the
+# analyzer used to mis-read as 'no leave found'.
+#
+# To stay under the cap we batch: up to BATCH_SIZE in a burst, then sleep
+# BATCH_REST_SECONDS before the next burst. REST must be >= 60s so that
+# PHR's 60s sliding window has rolled past the first call of the batch
+# before we start the next - otherwise batch N+1 still counts against
+# batch N inside that window.
+PEOPLE_HR_BATCH_SIZE = 40
+PEOPLE_HR_BATCH_REST_SECONDS = 60
 
 # Used to convert People HR absence days into hours. Holiday already
 # returns minutes so this only affects absence records.

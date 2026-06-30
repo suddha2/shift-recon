@@ -17,6 +17,8 @@ from analyzer import (
     check_over_allocations,
     check_rate_mismatches,
     check_visa_hour_violations,
+    check_late_starts,
+    summarize_rate_cards,
 )
 
 from database import (
@@ -147,7 +149,10 @@ with st.sidebar:
     st.info("💡 Edit rules in `config.py`")
 
 # Main content tabs
-tab1, tab2, tab3, tab4 = st.tabs(["🔍 New Analysis", "📊 View Results", "❌ Error Rows", "🗂️ History"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "🔍 New Analysis", "📊 View Results", "❌ Error Rows",
+    "💷 Rate Cards", "🗂️ History",
+])
 
 # Tab 1: New Analysis
 with tab1:
@@ -290,6 +295,15 @@ with tab1:
                             period_end=period_end,
                         )
 
+                        # Late-start check (Hourly shifts only, > 1 minute late)
+                        progress.progress(1.0, text="Checking late starts...")
+                        late_starts = check_late_starts(df)
+
+                        # Rate-card summary (informational, not violations - shown
+                        # in the Rate Cards tab)
+                        progress.progress(1.0, text="Summarising rate cards...")
+                        rate_cards = summarize_rate_cards(df)
+
                         # Finalize progress bar
                         progress.progress(1.0, text="✅ Analysis complete")
 
@@ -300,7 +314,13 @@ with tab1:
                             'unallowed_combinations': unallowed,
                             'rate_mismatches': rate_mismatches,
                             'visa_violations': visa_violations,
-                            'total_issues': len(duplicates) + len(over_allocs) + len(unallowed) + len(rate_mismatches) + len(visa_violations)
+                            'late_starts': late_starts,
+                            'rate_cards': rate_cards,
+                            'total_issues': (
+                                len(duplicates) + len(over_allocs) + len(unallowed)
+                                + len(rate_mismatches) + len(visa_violations)
+                                + len(late_starts)
+                            ),
                         }
 
                         st.session_state.results = results
@@ -337,7 +357,7 @@ with tab2:
         st.header("Analysis Results")
 
         # Summary metrics
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
         with col1:
             st.metric("Total Issues", results['total_issues'])
         with col2:
@@ -350,6 +370,8 @@ with tab2:
             st.metric("Rate Mismatches", len(results['rate_mismatches']))
         with col6:
             st.metric("Visa Violations", len(results['visa_violations']))
+        with col7:
+            st.metric("Late Starts", len(results.get('late_starts', [])))
         st.markdown("---")
 
         # Pagination helper
@@ -395,6 +417,9 @@ with tab2:
 
         visa_df = pd.DataFrame(results['visa_violations'])
         show_paginated_df(visa_df, "🔵 Visa Hours Violations", "visa")
+
+        late_df = pd.DataFrame(results.get('late_starts', []))
+        show_paginated_df(late_df, "🟢 Late Starts (Hourly shifts >1 min late)", "late")
 
         if results['total_issues'] == 0:
             st.success("✅ No issues found! All allocations are valid.")
@@ -454,8 +479,82 @@ with tab3:
     else:
         st.info("🔍 Upload a CSV file in the 'New Analysis' tab to get started.")
 
-# Tab 4: History
+# Tab 4: Rate Cards (informational - one row per employee)
 with tab4:
+    if st.session_state.analyzed and st.session_state.results:
+        rate_cards = st.session_state.results.get('rate_cards', []) or []
+        st.header("💷 Rate Cards by Employee")
+        st.caption("One row per employee. Rows highlighted in amber are on "
+                   "2+ distinct rate cards in this CSV - usually worth eyeballing.")
+
+        if not rate_cards:
+            st.info("No rate-card data available - the source CSV is missing "
+                    "the 'Actual Pay Rate Sheet Description' column.")
+        else:
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Employees", len(rate_cards))
+            with col2:
+                st.metric("On 2+ rate cards", sum(1 for r in rate_cards if r.get('is_multi_card')))
+            with col3:
+                st.metric("On 1 rate card",  sum(1 for r in rate_cards if r.get('distinct_rate_cards') == 1))
+            st.markdown("---")
+
+            # Flatten the rate_cards list-of-dicts (with nested breakdown) into
+            # a plain DataFrame so st.dataframe can highlight rows.
+            rows = []
+            for rec in rate_cards:
+                breakdown = "; ".join(f"{name} ({n})" for name, n in rec.get('rate_cards', []))
+                rows.append({
+                    'Employee': rec.get('employee_name'),
+                    'Total Shifts': rec.get('total_shifts'),
+                    'Distinct Rate Cards': rec.get('distinct_rate_cards'),
+                    'Rate Card Breakdown': breakdown,
+                    '_multi': bool(rec.get('is_multi_card')),
+                })
+            rc_df = pd.DataFrame(rows)
+
+            def highlight_multi(row):
+                if row.get('_multi'):
+                    return ['background-color: #FFE699'] * len(row)
+                return [''] * len(row)
+
+            # Drop the marker column from the visible table but keep it for styling
+            visible = rc_df.drop(columns=['_multi'])
+            styled = visible.style.apply(
+                lambda r: highlight_multi({'_multi': rc_df.loc[r.name, '_multi']}),
+                axis=1,
+            )
+            st.dataframe(styled, use_container_width=True, height=600)
+
+            # Quick filter for multi-card only
+            with st.expander("🟡 Only show employees on 2+ rate cards", expanded=False):
+                multi = rc_df[rc_df['_multi']].drop(columns=['_multi'])
+                if multi.empty:
+                    st.info("No employees are on more than one rate card.")
+                else:
+                    st.dataframe(multi, use_container_width=True)
+
+            # Excel export
+            col1, col2, col3 = st.columns([2, 1, 2])
+            with col2:
+                buf = io.BytesIO()
+                with pd.ExcelWriter(buf, engine='openpyxl') as writer:
+                    visible.to_excel(writer, index=False, sheet_name='Rate Cards')
+                buf.seek(0)
+                st.download_button(
+                    label="📥 Download as Excel",
+                    data=buf,
+                    file_name="rate_cards.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                )
+    else:
+        st.info("🔍 Upload a CSV file in the 'New Analysis' tab to get started.")
+
+
+# Tab 5: History
+with tab5:
     st.header("Analysis History")
     timestamps = get_unique_analysis_timestamps()
     

@@ -82,7 +82,7 @@ ALLOWED_COMBINATIONS = [
 ("Complex Waking Night","Waking Nights"),
 ("Complex Day Shift","Long Day"),
 ("Complex Floating","Shift Cover"),
-("Senior Carer Day","Shift  Long Day"),
+("Senior Carer Day Shift","Long Day"),
 
    # Add more allowed combinations here as: ("Service Type", "Requirement Type")
 ]

@@ -399,6 +399,107 @@ def check_unallowed_combinations(df):
     
     return issues
 
+def check_late_starts(df):
+    """
+    Flag Hourly *shift* rows that started more than 1 minute after the
+    planned start time.
+
+    Uses the CSV's pre-computed PunctualityStartTimeMinutes column
+    (positive = late, negative = early). Filters:
+      - Pay Rate Type == 'Hourly' (Fixed/Zero/Banded shifts don't pay
+        by the minute so a 1-minute drift has no payroll impact)
+      - Service Type contains 'Shift' (excludes Support/Shadow/etc.
+        mirror rows that duplicate the same actual shift under each
+        service user - flagging them triples the noise)
+
+    Per-row entries: every late shift produces one violation entry,
+    sorted by minutes-late descending.
+    """
+    issues = []
+
+    if 'Actual Pay Rate Type' not in df.columns:
+        return issues
+    if 'PunctualityStartTimeMinutes' not in df.columns:
+        return issues
+    if 'Actual Service Type Description' not in df.columns:
+        return issues
+
+    sub = df[df['Actual Pay Rate Type'].astype(str).str.strip() == 'Hourly'].copy()
+    sub = sub[sub['Actual Service Type Description']
+              .astype(str).str.contains('shift', case=False, na=False)]
+    sub['_punc'] = pd.to_numeric(sub['PunctualityStartTimeMinutes'], errors='coerce')
+    sub = sub.dropna(subset=['_punc'])
+    sub = sub[sub['_punc'] > 1]
+
+    for _, row in sub.iterrows():
+        start_dt = parse_datetime(row.get('Actual Start Date And Time'))
+        planned_dt = parse_datetime(row.get('Planned Start Date And Time'))
+        minutes_late = round(float(row['_punc']), 1)
+        svc = str(row.get('Actual Service Type Description', '') or '')
+        loc = str(row.get('Service Location Name', '') or '')
+
+        planned_s = planned_dt.strftime('%H:%M') if planned_dt else '?'
+        actual_s = start_dt.strftime('%H:%M') if start_dt else '?'
+
+        issues.append({
+            'issue_type': 'Late Start',
+            'employee_name': row.get('Actual Employee Name'),
+            'date': start_dt.date() if start_dt else None,
+            'week': None,
+            # Repurpose actual_hours / limit_hours to carry the minutes-late
+            # and threshold values (the existing DB schema only has these
+            # two numeric-ish columns; storing them here keeps the schema
+            # untouched).
+            'actual_hours': minutes_late,
+            'limit_hours': 1,
+            'shift_type': svc,
+            'details': f"Hourly shift started {minutes_late:.1f} min late "
+                       f"at '{loc}' (planned {planned_s}, actual {actual_s})",
+            'row_numbers': str(row['_row_num']),
+        })
+
+    issues.sort(key=lambda x: (x.get('actual_hours') or 0), reverse=True)
+    return issues
+
+
+def summarize_rate_cards(df):
+    """
+    Per-employee summary of the rate cards used in this CSV.
+
+    Returns a list of dicts (one per employee), sorted by
+    distinct_rate_cards desc so anyone on >1 card surfaces first:
+      - employee_name
+      - total_shifts
+      - distinct_rate_cards (count of non-blank distinct cards)
+      - rate_cards (list of (card_name, shift_count) tuples)
+      - is_multi_card (True if 2+ distinct non-blank cards)
+    """
+    if 'Actual Pay Rate Sheet Description' not in df.columns:
+        return []
+    if 'Actual Employee Name' not in df.columns:
+        return []
+
+    out = []
+    for emp, group in df.groupby('Actual Employee Name'):
+        cards = (group['Actual Pay Rate Sheet Description']
+                 .fillna('(blank)')
+                 .astype(str).str.strip()
+                 .replace('', '(blank)')
+                 .value_counts())
+        non_blank = [c for c in cards.index if c != '(blank)']
+        breakdown = [(c, int(n)) for c, n in cards.items()]
+        out.append({
+            'employee_name': emp,
+            'total_shifts': int(len(group)),
+            'distinct_rate_cards': len(non_blank),
+            'rate_cards': breakdown,
+            'is_multi_card': len(non_blank) >= 2,
+        })
+
+    out.sort(key=lambda x: (-x['distinct_rate_cards'], x['employee_name'] or ''))
+    return out
+
+
 def check_rate_mismatches(df):
     """
     Check for mismatches between actual pay rate and expected rate from RATE_CARD_MAP

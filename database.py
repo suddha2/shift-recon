@@ -221,7 +221,8 @@ def save_analysis_results(issues_dict, analysis_timestamp=None):
         issues_dict.get('duplicate_allocations', []) +
         issues_dict.get('over_allocations', []) +
         issues_dict.get('unallowed_combinations', []) +
-        issues_dict.get('visa_violations', [])
+        issues_dict.get('visa_violations', []) +
+        issues_dict.get('late_starts', [])
     )
     
     for issue in all_issues:

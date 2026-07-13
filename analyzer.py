@@ -404,11 +404,11 @@ def check_late_starts(df):
     Flag Hourly *shift* rows that started more than 1 minute after the
     planned start time.
 
-    Punctuality source (in order of preference):
-      1. The CSV's own PunctualityStartTimeMinutes column, if present.
-      2. Fallback: compute (Actual Start - Planned Start) in minutes
-         from the two datetime columns, so trimmed exports that only
-         include the core columns still get flagged.
+    Punctuality is always computed as (Actual Start - Planned Start) in
+    minutes. Both columns must be present; if either is missing the
+    check is skipped silently. Using the raw datetimes gives consistent
+    results across full and trimmed CSV exports (trimmed exports often
+    omit the pre-computed PunctualityStartTimeMinutes column).
 
     Filters:
       - Pay Rate Type == 'Hourly' (Fixed/Zero/Banded shifts don't pay
@@ -422,33 +422,28 @@ def check_late_starts(df):
     """
     issues = []
 
-    if 'Actual Pay Rate Type' not in df.columns:
-        return issues
-    if 'Actual Service Type Description' not in df.columns:
+    required = (
+        'Actual Pay Rate Type',
+        'Actual Service Type Description',
+        'Actual Start Date And Time',
+        'Planned Start Date And Time',
+    )
+    if not all(c in df.columns for c in required):
         return issues
 
     sub = df[df['Actual Pay Rate Type'].astype(str).str.strip() == 'Hourly'].copy()
     sub = sub[sub['Actual Service Type Description']
               .astype(str).str.contains('shift', case=False, na=False)]
 
-    if 'PunctualityStartTimeMinutes' in sub.columns:
-        sub['_punc'] = pd.to_numeric(sub['PunctualityStartTimeMinutes'], errors='coerce')
-    elif ('Actual Start Date And Time' in sub.columns
-          and 'Planned Start Date And Time' in sub.columns):
-        # Fallback: derive punctuality from (actual - planned) in minutes.
-        # parse_datetime is already tolerant of DD/MM/YYYY and Excel serials.
-        sub['_actual_start'] = sub['Actual Start Date And Time'].apply(parse_datetime)
-        sub['_planned_start'] = sub['Planned Start Date And Time'].apply(parse_datetime)
-        sub['_punc'] = sub.apply(
-            lambda r: ((r['_actual_start'] - r['_planned_start']).total_seconds() / 60.0)
-                       if (r['_actual_start'] is not None and r['_planned_start'] is not None
-                           and not pd.isna(r['_actual_start']) and not pd.isna(r['_planned_start']))
-                       else None,
-            axis=1,
-        )
-    else:
-        # No way to determine punctuality
-        return issues
+    sub['_actual_start'] = sub['Actual Start Date And Time'].apply(parse_datetime)
+    sub['_planned_start'] = sub['Planned Start Date And Time'].apply(parse_datetime)
+    sub['_punc'] = sub.apply(
+        lambda r: ((r['_actual_start'] - r['_planned_start']).total_seconds() / 60.0)
+                   if (r['_actual_start'] is not None and r['_planned_start'] is not None
+                       and not pd.isna(r['_actual_start']) and not pd.isna(r['_planned_start']))
+                   else None,
+        axis=1,
+    )
 
     sub = sub.dropna(subset=['_punc'])
     sub = sub[sub['_punc'] > 1]

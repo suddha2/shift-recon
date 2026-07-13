@@ -261,13 +261,17 @@ def check_duplicate_allocations(df):
             
             # Create shift details for both overlapping shifts
             shift_details = []
+            rate_cards = []
             for idx in [i, j]:
                 loc = rows.loc[idx, 'Service Location Name']
                 shift = rows.loc[idx, 'Actual Service Type Description']
                 start_time = rows.loc[idx, 'start_dt'].strftime('%H:%M')
                 end_time = rows.loc[idx, 'end_dt'].strftime('%H:%M')
                 shift_details.append(f"{shift} at {loc} ({start_time}-{end_time})")
-            
+                rc = str(rows.loc[idx].get('Actual Pay Rate Sheet Description', '') or '').strip()
+                if rc and rc.lower() not in ('nan', '(blank)'):
+                    rate_cards.append(rc)
+
             issues.append({
                 'issue_type': 'Duplicate Allocation',
                 'employee_name': emp,
@@ -278,7 +282,8 @@ def check_duplicate_allocations(df):
                 'shift_type': ' | '.join(shift_details),
                 'overlap_minutes': overlap_minutes,
                 'details': f"Overlapping shifts: {', '.join(reasons)} ({overlap_minutes} min overlap)",
-                'row_numbers': ', '.join(map(str, row_nums))
+                'row_numbers': ', '.join(map(str, row_nums)),
+                'rate_card': ' | '.join(sorted(set(rate_cards))),
             })
     
     return issues
@@ -351,6 +356,11 @@ def check_over_allocations(df):
 
                 if violation:
                     row_numbers = combo_group['_row_num'].tolist()
+                    rate_cards = sorted({
+                        str(c).strip()
+                        for c in combo_group.get('Actual Pay Rate Sheet Description', pd.Series(dtype=str))
+                        if str(c).strip() and str(c).strip().lower() != 'nan'
+                    })
                     issues.append({
                         'issue_type': 'Shift Type Hour Over-allocation',
                         'employee_name': emp,
@@ -360,7 +370,8 @@ def check_over_allocations(df):
                         'limit_hours': limit_value,
                         'shift_type': f"{shift_type} ({rate_type})",
                         'details': f"{total_combo_hours:.1f} hours of '{shift_type}' with '{rate_type}' rate - {violation_msg}",
-                        'row_numbers': ', '.join(map(str, row_numbers))
+                        'row_numbers': ', '.join(map(str, row_numbers)),
+                        'rate_card': ' | '.join(rate_cards),
                     })
   
 
@@ -394,7 +405,8 @@ def check_unallowed_combinations(df):
                 'limit_hours': None,
                 'shift_type': service_type,
                 'details': f"Invalid: '{service_type}' + '{requirement_type}'",
-                'row_numbers': str(row['_row_num'])
+                'row_numbers': str(row['_row_num']),
+                'rate_card': str(row.get('Actual Pay Rate Sheet Description', '') or '').strip(),
             })
     
     return issues
@@ -459,8 +471,6 @@ def check_late_starts(df):
         planned_s = planned_dt.strftime('%H:%M') if planned_dt else '?'
         actual_s = start_dt.strftime('%H:%M') if start_dt else '?'
 
-        rate_card_suffix = f" - rate card: {rate_card}" if rate_card else ""
-
         issues.append({
             'issue_type': 'Late Start',
             'employee_name': row.get('Actual Employee Name'),
@@ -474,8 +484,7 @@ def check_late_starts(df):
             'limit_hours': 1,
             'shift_type': svc,
             'details': f"Hourly shift started {minutes_late:.1f} min late "
-                       f"at '{loc}' (planned {planned_s}, actual {actual_s})"
-                       + rate_card_suffix,
+                       f"at '{loc}' (planned {planned_s}, actual {actual_s})",
             'row_numbers': str(row['_row_num']),
             'rate_card': rate_card,
         })
@@ -557,7 +566,8 @@ def check_rate_mismatches(df):
                         'limit_hours': expected_rate,
                         'shift_type': service_type,
                         'details': f"Expected rate: £{expected_rate:.2f}, Actual rate: £{actual_rate_float:.2f}",
-                        'row_numbers': str(row['_row_num'])
+                        'row_numbers': str(row['_row_num']),
+                        'rate_card': sheet_desc,
                     })
             except:
                 continue
@@ -641,6 +651,13 @@ def check_visa_hour_violations(df, visa_lookup, people_hr_lookup=None,
         week_end = date.fromisocalendar(int(year), int(week), 7)
         week_range = f"{week_start} to {week_end}"
 
+        # Distinct rate cards used across this employee's rows in this week
+        rate_cards_str = ' | '.join(sorted({
+            str(c).strip()
+            for c in group.get('Actual Pay Rate Sheet Description', pd.Series(dtype=str))
+            if str(c).strip() and str(c).strip().lower() != 'nan'
+        }))
+
         visa_status = visa_lookup.get(canonical_name(emp))
 
         # Employee not present in the visa feed
@@ -656,7 +673,8 @@ def check_visa_hour_violations(df, visa_lookup, people_hr_lookup=None,
                     'limit_hours': None,
                     'shift_type': None,
                     'details': f"No visa information found for '{emp}' in the employee data feed",
-                    'row_numbers': ', '.join(map(str, row_numbers))
+                    'row_numbers': ', '.join(map(str, row_numbers)),
+                    'rate_card': rate_cards_str,
                 })
             continue
 
@@ -727,6 +745,7 @@ def check_visa_hour_violations(df, visa_lookup, people_hr_lookup=None,
                 'leave': leave_status,
                 'leave_hours': leave_hours,
                 'leave_details': leave_details,
+                'rate_card': rate_cards_str,
             })
 
     return issues

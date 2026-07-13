@@ -454,9 +454,12 @@ def check_late_starts(df):
         minutes_late = round(float(row['_punc']), 1)
         svc = str(row.get('Actual Service Type Description', '') or '')
         loc = str(row.get('Service Location Name', '') or '')
+        rate_card = str(row.get('Actual Pay Rate Sheet Description', '') or '').strip()
 
         planned_s = planned_dt.strftime('%H:%M') if planned_dt else '?'
         actual_s = start_dt.strftime('%H:%M') if start_dt else '?'
+
+        rate_card_suffix = f" - rate card: {rate_card}" if rate_card else ""
 
         issues.append({
             'issue_type': 'Late Start',
@@ -471,8 +474,10 @@ def check_late_starts(df):
             'limit_hours': 1,
             'shift_type': svc,
             'details': f"Hourly shift started {minutes_late:.1f} min late "
-                       f"at '{loc}' (planned {planned_s}, actual {actual_s})",
+                       f"at '{loc}' (planned {planned_s}, actual {actual_s})"
+                       + rate_card_suffix,
             'row_numbers': str(row['_row_num']),
+            'rate_card': rate_card,
         })
 
     issues.sort(key=lambda x: (x.get('actual_hours') or 0), reverse=True)

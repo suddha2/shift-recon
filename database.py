@@ -63,6 +63,7 @@ def init_database():
         ("leave", "TEXT"),
         ("leave_hours", "REAL"),
         ("leave_details", "TEXT"),
+        ("rate_card", "TEXT"),
     ):
         try:
             cursor.execute(f"ALTER TABLE {ANALYSIS_TABLE} ADD COLUMN {col} {coltype}")
@@ -240,6 +241,7 @@ def save_analysis_results(issues_dict, analysis_timestamp=None):
             'leave': issue.get('leave', 'N/A'),
             'leave_hours': issue.get('leave_hours'),
             'leave_details': issue.get('leave_details', ''),
+            'rate_card': issue.get('rate_card', ''),
         })
     
     if records:

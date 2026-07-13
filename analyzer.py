@@ -404,8 +404,13 @@ def check_late_starts(df):
     Flag Hourly *shift* rows that started more than 1 minute after the
     planned start time.
 
-    Uses the CSV's pre-computed PunctualityStartTimeMinutes column
-    (positive = late, negative = early). Filters:
+    Punctuality source (in order of preference):
+      1. The CSV's own PunctualityStartTimeMinutes column, if present.
+      2. Fallback: compute (Actual Start - Planned Start) in minutes
+         from the two datetime columns, so trimmed exports that only
+         include the core columns still get flagged.
+
+    Filters:
       - Pay Rate Type == 'Hourly' (Fixed/Zero/Banded shifts don't pay
         by the minute so a 1-minute drift has no payroll impact)
       - Service Type contains 'Shift' (excludes Support/Shadow/etc.
@@ -419,15 +424,32 @@ def check_late_starts(df):
 
     if 'Actual Pay Rate Type' not in df.columns:
         return issues
-    if 'PunctualityStartTimeMinutes' not in df.columns:
-        return issues
     if 'Actual Service Type Description' not in df.columns:
         return issues
 
     sub = df[df['Actual Pay Rate Type'].astype(str).str.strip() == 'Hourly'].copy()
     sub = sub[sub['Actual Service Type Description']
               .astype(str).str.contains('shift', case=False, na=False)]
-    sub['_punc'] = pd.to_numeric(sub['PunctualityStartTimeMinutes'], errors='coerce')
+
+    if 'PunctualityStartTimeMinutes' in sub.columns:
+        sub['_punc'] = pd.to_numeric(sub['PunctualityStartTimeMinutes'], errors='coerce')
+    elif ('Actual Start Date And Time' in sub.columns
+          and 'Planned Start Date And Time' in sub.columns):
+        # Fallback: derive punctuality from (actual - planned) in minutes.
+        # parse_datetime is already tolerant of DD/MM/YYYY and Excel serials.
+        sub['_actual_start'] = sub['Actual Start Date And Time'].apply(parse_datetime)
+        sub['_planned_start'] = sub['Planned Start Date And Time'].apply(parse_datetime)
+        sub['_punc'] = sub.apply(
+            lambda r: ((r['_actual_start'] - r['_planned_start']).total_seconds() / 60.0)
+                       if (r['_actual_start'] is not None and r['_planned_start'] is not None
+                           and not pd.isna(r['_actual_start']) and not pd.isna(r['_planned_start']))
+                       else None,
+            axis=1,
+        )
+    else:
+        # No way to determine punctuality
+        return issues
+
     sub = sub.dropna(subset=['_punc'])
     sub = sub[sub['_punc'] > 1]
 

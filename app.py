@@ -514,17 +514,18 @@ with tab4:
                 })
             rc_df = pd.DataFrame(rows)
 
-            def highlight_multi(row):
-                if row.get('_multi'):
-                    return ['background-color: #FFE699'] * len(row)
-                return [''] * len(row)
-
-            # Drop the marker column from the visible table but keep it for styling
+            # Drop the marker column from the visible table but keep the
+            # flag on rc_df for row-level styling. The styler needs a list
+            # of style strings the same length as the row (one per visible
+            # column) - len(row) here gives that automatically.
             visible = rc_df.drop(columns=['_multi'])
-            styled = visible.style.apply(
-                lambda r: highlight_multi({'_multi': rc_df.loc[r.name, '_multi']}),
-                axis=1,
-            )
+
+            def highlight_multi(row):
+                is_multi = bool(rc_df.loc[row.name, '_multi'])
+                bg = 'background-color: #FFE699' if is_multi else ''
+                return [bg] * len(row)
+
+            styled = visible.style.apply(highlight_multi, axis=1)
             st.dataframe(styled, use_container_width=True, height=600)
 
             # Quick filter for multi-card only

@@ -186,6 +186,7 @@ VISA_HOUR_ELIGIBLE_SHIFT_TYPES = (
     "Prelim Day Shift",
     "Prelim Floating Shift",
     "On Call Shift",
+    "Senior Carer Day Shift",
 )
 
 # ============================================

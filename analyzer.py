@@ -392,15 +392,21 @@ def check_over_allocations(df):
 
 def check_unallowed_combinations(df):
     """
-    Check for unallowed combinations of Service Type and Requirement Type
-    Using whitelist approach - flag anything NOT in ALLOWED_COMBINATIONS
-    Returns list of issue dictionaries
+    Check for unallowed combinations of Service Type and Requirement Type.
+    Using whitelist approach - flag anything NOT in ALLOWED_COMBINATIONS.
+
+    Uses Planned Service Type Description + Planned Service Requirement
+    Type Description, NOT the Actual columns. Mobizio's auto-corrections
+    re-write the Planned side without touching Actual, so checking the
+    Planned pair reflects the current (corrected) intent.
+
+    Returns list of issue dictionaries.
     """
     issues = []
-    
+
     for idx, row in df.iterrows():
-        service_type = row['Actual Service Type Description']
-        requirement_type = row['Actual Service Requirement Type Description']
+        service_type = row['Planned Service Type Description']
+        requirement_type = row['Planned Service Requirement Type Description']
         
         # Skip if either value is empty
         if pd.isna(service_type) or pd.isna(requirement_type) or service_type == '' or requirement_type == '':

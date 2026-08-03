@@ -25,9 +25,19 @@ SHIFT_TYPE_LIMITS = {
     ("Shift Lead - Shift","Fixed"):{"operator": "<=", "value": 8}, 
     ("Training","Hourly"):{"operator": "<=", "value": 8},  
     ("Shadow","Hourly"):{"operator": "<=", "value": 6},  
-    ("Paid Sleep In ","Fixed"):{"operator": "<=", "value": 10}, 
+    ("Paid Sleep In ","Fixed"):{"operator": "<=", "value": 10},
     # Add more shift types here as: "Shift Type Name": max_count
 }
+
+# Service types to skip entirely in the Over-allocation check even if
+# they have an entry in SHIFT_TYPE_LIMITS above. Matched case-
+# insensitively and whitespace-tolerantly. Add / remove here rather
+# than removing the SHIFT_TYPE_LIMITS row so the intended per-shift
+# hour policy is still documented.
+OVER_ALLOCATION_EXCLUDE_SHIFT_TYPES = (
+    "Shift Lead - Shift",
+    "L - Day Shift",
+)
 
 # ============================================
 # EMPLOYEE HOUR LIMITS

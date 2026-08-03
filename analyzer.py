@@ -8,6 +8,7 @@ from config import (
     SHIFT_TYPE_LIMITS, EMPLOYEE_HOUR_LIMITS, DEFAULT_HOUR_LIMIT,
     ALLOWED_COMBINATIONS, RATE_CARD_MAP, VISA_HOUR_RULES,
     VISA_HOUR_ELIGIBLE_SHIFT_TYPES,
+    OVER_ALLOCATION_EXCLUDE_SHIFT_TYPES,
 )
 
 
@@ -26,6 +27,11 @@ _VISA_ELIGIBLE_SET = {
 _ALLOWED_COMBINATIONS_SET = {
     (str(s).strip().lower(), str(r).strip().lower())
     for s, r in ALLOWED_COMBINATIONS
+}
+
+# Service types skipped by the Over-allocation check.
+_OVER_ALLOC_EXCLUDE_SET = {
+    str(s).strip().lower() for s in OVER_ALLOCATION_EXCLUDE_SHIFT_TYPES
 }
 
 
@@ -343,6 +349,14 @@ def check_over_allocations(df):
 
         for combo, combo_group in combo_groups:
             shift_type, rate_type = combo
+
+            # Skip service types explicitly excluded from over-allocation
+            # (case-insensitive). Kept as a config knob rather than a
+            # code change so ops can tune the list without touching this
+            # file.
+            if str(shift_type or '').strip().lower() in _OVER_ALLOC_EXCLUDE_SET:
+                continue
+
             total_combo_hours = combo_group['hours'].sum()
 
             if combo in SHIFT_TYPE_LIMITS:

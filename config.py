@@ -39,6 +39,17 @@ OVER_ALLOCATION_EXCLUDE_SHIFT_TYPES = (
     "L - Day Shift",
 )
 
+# Service types to skip entirely in the Duplicate Allocation check.
+# These are shifts that by design overlap with a worker's other shifts
+# (a Shift Lead is running the shift and also participating in it; an
+# L - Day Shift straddles day boundaries), so overlap detection
+# produces noise. Rows with these service types are dropped BEFORE
+# overlap pairs are computed, so they can't be either side of a flag.
+DUPLICATE_ALLOCATION_EXCLUDE_SHIFT_TYPES = (
+    "Shift Lead - Shift",
+    "L - Day Shift",
+)
+
 # ============================================
 # EMPLOYEE HOUR LIMITS
 # ============================================

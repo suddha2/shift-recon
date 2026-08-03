@@ -9,6 +9,7 @@ from config import (
     ALLOWED_COMBINATIONS, RATE_CARD_MAP, VISA_HOUR_RULES,
     VISA_HOUR_ELIGIBLE_SHIFT_TYPES,
     OVER_ALLOCATION_EXCLUDE_SHIFT_TYPES,
+    DUPLICATE_ALLOCATION_EXCLUDE_SHIFT_TYPES,
 )
 
 
@@ -32,6 +33,11 @@ _ALLOWED_COMBINATIONS_SET = {
 # Service types skipped by the Over-allocation check.
 _OVER_ALLOC_EXCLUDE_SET = {
     str(s).strip().lower() for s in OVER_ALLOCATION_EXCLUDE_SHIFT_TYPES
+}
+
+# Service types skipped by the Duplicate Allocation check.
+_DUP_ALLOC_EXCLUDE_SET = {
+    str(s).strip().lower() for s in DUPLICATE_ALLOCATION_EXCLUDE_SHIFT_TYPES
 }
 
 
@@ -159,6 +165,12 @@ def check_duplicate_allocations(df):
 
     # Filter to include only rows where 'Actual Service Type Description' contains 'shift' (case-insensitive)
     df = df[df['Actual Service Type Description'].str.contains('shift', case=False, na=False)]
+
+    # Drop service types explicitly excluded from duplicate detection
+    # (e.g. Shift Lead - Shift, L - Day Shift) - see config constant
+    # DUPLICATE_ALLOCATION_EXCLUDE_SHIFT_TYPES for rationale.
+    df = df[~df['Actual Service Type Description'].astype(str)
+              .str.strip().str.lower().isin(_DUP_ALLOC_EXCLUDE_SET)]
 
     # Prefer Planned start/end for the overlap math; fall back to Actual
     # if the Planned columns are absent (trimmed CSV exports).

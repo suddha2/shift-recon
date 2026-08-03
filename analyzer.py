@@ -128,19 +128,25 @@ def is_visa_hour_eligible(service_type):
 
 def check_duplicate_allocations(df):
     """
-    Find duplicate allocations for the same employee with overlapping times
-    Only flags when shifts actually overlap in time (not just same day)
-    Also checks: different locations or different shift types during overlap
-    Returns list of issue dictionaries
+    Find duplicate allocations for the same employee with overlapping times.
+    Only flags when shifts actually overlap in time (not just same day).
+    Also checks: different locations or different shift types during overlap.
+
+    Uses Planned Start/End Date And Time for the overlap math, not the
+    Actual times. Mobizio's auto-corrections re-write Planned columns
+    without touching Actual, so overlaps that have been resolved
+    upstream would keep getting flagged if we looked at Actual times.
+
+    Returns list of issue dictionaries.
     """
     issues = []
 
     # Filter to include only rows where 'Actual Service Type Description' contains 'shift' (case-insensitive)
     df = df[df['Actual Service Type Description'].str.contains('shift', case=False, na=False)]
-    
-    # Parse datetime columns
-    df['start_dt'] = df['Actual Start Date And Time'].apply(parse_datetime)
-    df['end_dt'] = df['Actual End Date And Time'].apply(parse_datetime)
+
+    # Parse datetime columns from PLANNED times (see docstring).
+    df['start_dt'] = df['Planned Start Date And Time'].apply(parse_datetime)
+    df['end_dt'] = df['Planned End Date And Time'].apply(parse_datetime)
     df['date'] = df['start_dt'].apply(lambda x: x.date() if x else None)
     
     # Group by employee AND date (only check overlaps on same day)
@@ -290,15 +296,21 @@ def check_duplicate_allocations(df):
 
 def check_over_allocations(df):
     """
-    Check for over-allocations based on shift type + rate type limits and hour limits
-    Supports flexible operators: <=, >=, <, >, ==
-    Returns list of issue dictionaries
+    Check for over-allocations based on shift type + rate type limits.
+    Supports flexible operators: <=, >=, <, >, ==.
+
+    Uses Planned Start/End Date And Time for the hours math, not the
+    Actual times. Mobizio's auto-corrections re-write Planned columns
+    without touching Actual, so hours that have been corrected upstream
+    would keep getting flagged if we looked at Actual times.
+
+    Returns list of issue dictionaries.
     """
     issues = []
 
-    # Parse datetime columns
-    df['start_dt'] = df['Actual Start Date And Time'].apply(parse_datetime)
-    df['end_dt'] = df['Actual End Date And Time'].apply(parse_datetime)
+    # Parse datetime columns from PLANNED times (see docstring).
+    df['start_dt'] = df['Planned Start Date And Time'].apply(parse_datetime)
+    df['end_dt'] = df['Planned End Date And Time'].apply(parse_datetime)
     df['date'] = df['start_dt'].apply(lambda x: x.date() if x else None)
     df['hours'] = df.apply(lambda row: calculate_hours(row['start_dt'], row['end_dt']), axis=1)
 

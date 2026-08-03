@@ -147,10 +147,11 @@ def check_duplicate_allocations(df):
     Only flags when shifts actually overlap in time (not just same day).
     Also checks: different locations or different shift types during overlap.
 
-    Uses Planned Start/End Date And Time for the overlap math, not the
-    Actual times. Mobizio's auto-corrections re-write Planned columns
-    without touching Actual, so overlaps that have been resolved
-    upstream would keep getting flagged if we looked at Actual times.
+    Prefers Planned Start/End Date And Time for the overlap math, since
+    Mobizio's auto-corrections re-write Planned columns without touching
+    Actual - so overlaps resolved upstream would keep getting flagged if
+    we looked at Actual times. Falls back to Actual Start/End when the
+    Planned columns aren't in the CSV (trimmed exports).
 
     Returns list of issue dictionaries.
     """
@@ -159,9 +160,14 @@ def check_duplicate_allocations(df):
     # Filter to include only rows where 'Actual Service Type Description' contains 'shift' (case-insensitive)
     df = df[df['Actual Service Type Description'].str.contains('shift', case=False, na=False)]
 
-    # Parse datetime columns from PLANNED times (see docstring).
-    df['start_dt'] = df['Planned Start Date And Time'].apply(parse_datetime)
-    df['end_dt'] = df['Planned End Date And Time'].apply(parse_datetime)
+    # Prefer Planned start/end for the overlap math; fall back to Actual
+    # if the Planned columns are absent (trimmed CSV exports).
+    if 'Planned Start Date And Time' in df.columns and 'Planned End Date And Time' in df.columns:
+        start_col, end_col = 'Planned Start Date And Time', 'Planned End Date And Time'
+    else:
+        start_col, end_col = 'Actual Start Date And Time', 'Actual End Date And Time'
+    df['start_dt'] = df[start_col].apply(parse_datetime)
+    df['end_dt']   = df[end_col].apply(parse_datetime)
     df['date'] = df['start_dt'].apply(lambda x: x.date() if x else None)
     
     # Group by employee AND date (only check overlaps on same day)
@@ -314,18 +320,25 @@ def check_over_allocations(df):
     Check for over-allocations based on shift type + rate type limits.
     Supports flexible operators: <=, >=, <, >, ==.
 
-    Uses Planned Start/End Date And Time for the hours math, not the
-    Actual times. Mobizio's auto-corrections re-write Planned columns
-    without touching Actual, so hours that have been corrected upstream
-    would keep getting flagged if we looked at Actual times.
+    Prefers Planned Start/End Date And Time for the hours math, since
+    Mobizio's auto-corrections re-write Planned columns without touching
+    Actual - so hours that have been corrected upstream would keep
+    getting flagged if we looked at Actual times. Falls back to Actual
+    Start/End when the Planned columns aren't in the CSV (trimmed
+    exports).
 
     Returns list of issue dictionaries.
     """
     issues = []
 
-    # Parse datetime columns from PLANNED times (see docstring).
-    df['start_dt'] = df['Planned Start Date And Time'].apply(parse_datetime)
-    df['end_dt'] = df['Planned End Date And Time'].apply(parse_datetime)
+    # Prefer Planned start/end for hours; fall back to Actual if Planned
+    # isn't in the CSV (trimmed exports).
+    if 'Planned Start Date And Time' in df.columns and 'Planned End Date And Time' in df.columns:
+        start_col, end_col = 'Planned Start Date And Time', 'Planned End Date And Time'
+    else:
+        start_col, end_col = 'Actual Start Date And Time', 'Actual End Date And Time'
+    df['start_dt'] = df[start_col].apply(parse_datetime)
+    df['end_dt']   = df[end_col].apply(parse_datetime)
     df['date'] = df['start_dt'].apply(lambda x: x.date() if x else None)
     df['hours'] = df.apply(lambda row: calculate_hours(row['start_dt'], row['end_dt']), axis=1)
 
@@ -418,18 +431,26 @@ def check_unallowed_combinations(df):
     Check for unallowed combinations of Service Type and Requirement Type.
     Using whitelist approach - flag anything NOT in ALLOWED_COMBINATIONS.
 
-    Uses Planned Service Type Description + Planned Service Requirement
-    Type Description, NOT the Actual columns. Mobizio's auto-corrections
-    re-write the Planned side without touching Actual, so checking the
-    Planned pair reflects the current (corrected) intent.
+    Prefers the Planned Service Type / Requirement Type columns, since
+    Mobizio's auto-corrections re-write Planned without touching Actual
+    - so checking the Planned pair reflects the current (corrected)
+    intent. Falls back to the Actual columns when Planned aren't
+    present in the CSV (trimmed exports).
 
     Returns list of issue dictionaries.
     """
     issues = []
 
+    svc_col = ('Planned Service Type Description'
+               if 'Planned Service Type Description' in df.columns
+               else 'Actual Service Type Description')
+    req_col = ('Planned Service Requirement Type Description'
+               if 'Planned Service Requirement Type Description' in df.columns
+               else 'Actual Service Requirement Type Description')
+
     for idx, row in df.iterrows():
-        service_type = row['Planned Service Type Description']
-        requirement_type = row['Planned Service Requirement Type Description']
+        service_type = row[svc_col]
+        requirement_type = row[req_col]
         
         # Skip if either value is empty
         if pd.isna(service_type) or pd.isna(requirement_type) or service_type == '' or requirement_type == '':

@@ -19,6 +19,15 @@ _VISA_ELIGIBLE_SET = {
     str(s).strip().lower() for s in VISA_HOUR_ELIGIBLE_SHIFT_TYPES
 }
 
+# Same idea for ALLOWED_COMBINATIONS - build a normalized set of
+# (service_type, requirement_type) tuples so the combo check tolerates
+# casing / whitespace drift ('Ad Hoc Shift' vs 'Ad hoc Shift', trailing
+# spaces, etc.).
+_ALLOWED_COMBINATIONS_SET = {
+    (str(s).strip().lower(), str(r).strip().lower())
+    for s, r in ALLOWED_COMBINATIONS
+}
+
 
 def canonical_name(name):
     """
@@ -411,9 +420,11 @@ def check_unallowed_combinations(df):
         # Skip if either value is empty
         if pd.isna(service_type) or pd.isna(requirement_type) or service_type == '' or requirement_type == '':
             continue
-        
-        # Check if combination is in whitelist
-        if (service_type, requirement_type) not in ALLOWED_COMBINATIONS:
+
+        # Check if combination is in whitelist. Case-insensitive +
+        # whitespace-tolerant match via the pre-built normalized set.
+        key = (str(service_type).strip().lower(), str(requirement_type).strip().lower())
+        if key not in _ALLOWED_COMBINATIONS_SET:
             issues.append({
                 'issue_type': 'Unallowed Combination',
                 'employee_name': row['Actual Employee Name'],

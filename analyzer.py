@@ -711,6 +711,20 @@ def check_visa_hour_violations(df, visa_lookup, people_hr_lookup=None,
     df['week'] = df['start_dt'].apply(lambda x: get_week_number(x)[0])
     df['year'] = df['start_dt'].apply(lambda x: get_week_number(x)[1])
 
+    # Also compute Planned duration per row so we can show planned vs
+    # actual hours side by side. Falls back to 0 when Planned columns
+    # aren't in the CSV (trimmed exports still include them, but be safe).
+    if ('Planned Start Date And Time' in df.columns
+            and 'Planned End Date And Time' in df.columns):
+        df['planned_start_dt'] = df['Planned Start Date And Time'].apply(parse_datetime)
+        df['planned_end_dt']   = df['Planned End Date And Time'].apply(parse_datetime)
+        df['planned_hours']    = df.apply(
+            lambda r: calculate_hours(r['planned_start_dt'], r['planned_end_dt']),
+            axis=1,
+        )
+    else:
+        df['planned_hours'] = 0.0
+
     flagged_missing = set()
 
     grouped = df.groupby(['Actual Employee Name', 'year', 'week'])
@@ -720,6 +734,7 @@ def check_visa_hour_violations(df, visa_lookup, people_hr_lookup=None,
             continue
 
         total_hours = group['hours'].sum()
+        total_planned_hours = float(group.get('planned_hours', pd.Series(dtype=float)).sum() or 0.0)
         row_numbers = group['_row_num'].tolist()
         week_label = f"{int(year)}-W{int(week):02d}"
         # Monday-Sunday calendar range for this ISO week
@@ -751,6 +766,7 @@ def check_visa_hour_violations(df, visa_lookup, people_hr_lookup=None,
                     'details': f"No visa information found for '{emp}' in the employee data feed",
                     'row_numbers': ', '.join(map(str, row_numbers)),
                     'rate_card': rate_cards_str,
+                    'planned_hours': round(total_planned_hours, 1),
                 })
             continue
 
@@ -813,6 +829,7 @@ def check_visa_hour_violations(df, visa_lookup, people_hr_lookup=None,
                 'date': week_range,
                 'week': week_label,
                 'actual_hours': round(total_hours, 1),
+                'planned_hours': round(total_planned_hours, 1),
                 'limit_hours': limit_value,
                 'shift_type': visa_status,
                 'details': f"{total_hours:.1f} hours worked in week {week_label} "

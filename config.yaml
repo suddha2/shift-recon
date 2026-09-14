@@ -11,5 +11,9 @@ credentials:
 
 cookie:
   expiry_days: 1
-  key: random_signature_key_12345  # Change this to a random string
+  # PyJWT >=2.10 enforces the RFC 2104 HMAC minimum (>=32 bytes for HS256).
+  # Rotating this value invalidates every existing user session in one
+  # go - all users have to log in again once. Regenerate with:
+  #   python -c 'import secrets; print(secrets.token_urlsafe(48))'
+  key: lqs2NxgsjtWf20AxgAZubw7w_4dqIcFh_sw68-wVg94AeQcseCEH6QhOjLzrKjvV
   name: midco_wf_cookie
